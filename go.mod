@@ -1,4 +1,4 @@
-module github.com/seaagent/hermes-sdk
+module github.com/VtrixAI/sandbox-go
 
 go 1.21
 

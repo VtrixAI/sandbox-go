@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 
-	sandbox "github.com/seaagent/hermes-sdk/src"
+	sandbox "github.com/VtrixAI/sandbox-go/src"
 )
 
 func main() {
