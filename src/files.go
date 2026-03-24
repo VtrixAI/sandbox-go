@@ -49,10 +49,15 @@ func (s *Sandbox) Edit(ctx context.Context, path, oldText, newText string) (*Edi
 }
 
 // WriteFiles writes multiple files at once. Content is raw bytes (base64-encoded over the wire).
+// If WriteFileEntry.Mode is non-zero, the server sets that Unix permission after writing.
 func (s *Sandbox) WriteFiles(ctx context.Context, files []WriteFileEntry) error {
 	for _, f := range files {
 		encoded := base64.StdEncoding.EncodeToString(f.Content)
-		_, err := s.call(ctx, "write_binary", map[string]any{"path": f.Path, "data": encoded}, nil)
+		params := map[string]any{"path": f.Path, "data": encoded}
+		if f.Mode != 0 {
+			params["mode"] = f.Mode
+		}
+		_, err := s.call(ctx, "write_binary", params, nil)
 		if err != nil {
 			return fmt.Errorf("write_binary %q: %w", f.Path, err)
 		}
@@ -61,10 +66,15 @@ func (s *Sandbox) WriteFiles(ctx context.Context, files []WriteFileEntry) error 
 }
 
 // ReadToBuffer reads a file and returns its raw bytes.
+// Returns nil, nil if the file does not exist (no error).
 // For images the base64 data is decoded; for text the content is returned as-is.
 func (s *Sandbox) ReadToBuffer(ctx context.Context, path string) ([]byte, error) {
 	result, err := s.Read(ctx, path)
 	if err != nil {
+		// file-not-found → return nil without error, consistent with Vercel SDK
+		if rpcErr, ok := err.(*rpcError); ok && rpcErr.Code == -32001 {
+			return nil, nil
+		}
 		return nil, err
 	}
 	if result.Type == "image" {
@@ -85,11 +95,15 @@ func (s *Sandbox) MkDir(ctx context.Context, path string) error {
 
 // DownloadFile downloads a file from the sandbox to a local path.
 // If opts.MkdirRecursive is true, parent directories are created automatically.
-// Returns the absolute local path of the saved file.
+// Returns the absolute local path of the saved file, or "" if the file does not exist.
 func (s *Sandbox) DownloadFile(ctx context.Context, sandboxPath, localPath string, opts *DownloadOptions) (string, error) {
 	data, err := s.ReadToBuffer(ctx, sandboxPath)
 	if err != nil {
 		return "", fmt.Errorf("download %q: %w", sandboxPath, err)
+	}
+	if data == nil {
+		// file does not exist
+		return "", nil
 	}
 
 	abs, err := filepath.Abs(localPath)
@@ -150,6 +164,7 @@ func (s *Sandbox) Domain(port int) string {
 
 // UploadFile reads a local file and writes it into the sandbox at sandboxPath.
 // If opts.MkdirRecursive is true, parent directories are created in the sandbox first.
+// If opts.Mode is non-zero, that Unix permission is set on the remote file.
 func (s *Sandbox) UploadFile(ctx context.Context, localPath, sandboxPath string, opts *DownloadOptions) error {
 	data, err := os.ReadFile(localPath)
 	if err != nil {
@@ -161,7 +176,8 @@ func (s *Sandbox) UploadFile(ctx context.Context, localPath, sandboxPath string,
 		}
 	}
 	encoded := base64.StdEncoding.EncodeToString(data)
-	_, err = s.call(ctx, "write_binary", map[string]any{"path": sandboxPath, "data": encoded}, nil)
+	params := map[string]any{"path": sandboxPath, "data": encoded}
+	_, err = s.call(ctx, "write_binary", params, nil)
 	return err
 }
 

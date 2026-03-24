@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"encoding/json"
+	"io"
 	"time"
 )
 
@@ -62,6 +63,11 @@ type ExecOptions struct {
 	// Args are shell-quoted and appended to command: Execute("ls", &ExecOptions{Args: []string{"-la", "/tmp"}}).
 	// Prefer using Args over embedding arguments in the command string to avoid shell injection.
 	Args       []string
+	// Stdout, when non-nil, receives each stdout chunk as it arrives.
+	// Execute will use streaming internally and write to this writer.
+	Stdout     io.Writer
+	// Stderr, when non-nil, receives each stderr chunk as it arrives.
+	Stderr     io.Writer
 }
 
 // DownloadOptions configures a DownloadFile call.
@@ -108,6 +114,9 @@ type detachedResult struct {
 type WriteFileEntry struct {
 	Path    string
 	Content []byte
+	// Mode is the optional Unix file permission bits (e.g. 0o755 for executable).
+	// When zero, the server default is used.
+	Mode uint32
 }
 
 // ReadResult is the result of a read call.

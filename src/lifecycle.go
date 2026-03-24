@@ -146,6 +146,24 @@ func (sb *Sandbox) Status() string { return sb.Info.Status }
 // ExpireAt returns the sandbox expiry time from the cached Info (RFC3339).
 func (sb *Sandbox) ExpireAt() string { return sb.Info.ExpireAt }
 
+// Timeout returns the remaining sandbox lifetime in milliseconds based on the
+// cached Info.ExpireAt field. Returns 0 if ExpireAt is empty or already past.
+// Call Refresh first to get a fresh value.
+func (sb *Sandbox) Timeout() int64 {
+	if sb.Info.ExpireAt == "" {
+		return 0
+	}
+	t, err := time.Parse(time.RFC3339, sb.Info.ExpireAt)
+	if err != nil {
+		return 0
+	}
+	ms := time.Until(t).Milliseconds()
+	if ms < 0 {
+		return 0
+	}
+	return ms
+}
+
 // Update patches the sandbox spec/image/env. At least one field in opts must be set.
 func (sb *Sandbox) Update(ctx context.Context, c *Client, opts UpdateOptions) error {
 	body, _ := json.Marshal(opts)

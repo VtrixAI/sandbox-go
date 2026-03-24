@@ -9,7 +9,12 @@ import (
 )
 
 // Execute runs a bash command and returns the result as a CommandFinished.
+// If opts.Stdout or opts.Stderr are set, output is streamed to those writers
+// as it arrives; execution still blocks until the command finishes.
 func (s *Sandbox) Execute(ctx context.Context, command string, opts *ExecOptions) (*CommandFinished, error) {
+	if opts != nil && (opts.Stdout != nil || opts.Stderr != nil) {
+		return s.executeWithWriters(ctx, command, opts)
+	}
 	resp, err := s.call(ctx, "exec", s.buildExecParams(command, opts), nil)
 	if err != nil {
 		return nil, err
@@ -19,10 +24,31 @@ func (s *Sandbox) Execute(ctx context.Context, command string, opts *ExecOptions
 		return nil, fmt.Errorf("exec result parse: %w", err)
 	}
 	return &CommandFinished{
-		Command:  Command{CmdID: result.CmdID, sandbox: s, StartedAt: time.Now()},
+		Command:  Command{CmdID: result.CmdID, sandbox: s, StartedAt: time.Now(), WorkingDir: workingDirOf(opts)},
 		ExitCode: result.ExitCode,
 		Output:   result.Output,
 	}, nil
+}
+
+// executeWithWriters is the internal streaming path used when Stdout/Stderr writers are set.
+func (s *Sandbox) executeWithWriters(ctx context.Context, command string, opts *ExecOptions) (*CommandFinished, error) {
+	eventCh, resultCh, errCh := s.ExecuteStream(ctx, command, opts)
+	for ev := range eventCh {
+		switch ev.Type {
+		case "stdout":
+			if opts.Stdout != nil {
+				_, _ = fmt.Fprint(opts.Stdout, ev.Data)
+			}
+		case "stderr":
+			if opts.Stderr != nil {
+				_, _ = fmt.Fprint(opts.Stderr, ev.Data)
+			}
+		}
+	}
+	if err := <-errCh; err != nil {
+		return nil, err
+	}
+	return <-resultCh, nil
 }
 
 // ExecuteStream runs a bash command and streams ExecEvents in real time.
@@ -64,7 +90,7 @@ func (s *Sandbox) ExecuteStream(ctx context.Context, command string, opts *ExecO
 			return
 		}
 		resultCh <- &CommandFinished{
-			Command:  Command{CmdID: result.CmdID, sandbox: s, StartedAt: time.Now()},
+			Command:  Command{CmdID: result.CmdID, sandbox: s, StartedAt: time.Now(), WorkingDir: workingDirOf(opts)},
 			ExitCode: result.ExitCode,
 			Output:   result.Output,
 		}
@@ -209,4 +235,11 @@ func (s *Sandbox) buildExecParams(command string, opts *ExecOptions) map[string]
 // Single quotes are escaped by ending the quote, inserting a literal quote, and reopening.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func workingDirOf(opts *ExecOptions) string {
+	if opts != nil {
+		return opts.WorkingDir
+	}
+	return ""
 }
