@@ -103,6 +103,11 @@ func (c *Command) CollectOutput(ctx context.Context, stream string) (string, err
 	return c.collectOutput(ctx, stream)
 }
 
+// Output is an alias for CollectOutput. stream is "stdout", "stderr", or "both".
+func (c *Command) Output(ctx context.Context, stream string) (string, error) {
+	return c.collectOutput(ctx, stream)
+}
+
 // Kill sends a signal to the command.
 // signal is one of "SIGTERM" (default), "SIGKILL", "SIGINT", "SIGHUP".
 func (c *Command) Kill(ctx context.Context, signal string) error {

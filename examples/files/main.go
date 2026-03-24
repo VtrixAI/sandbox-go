@@ -54,7 +54,7 @@ func main() {
 print("Hello from Python inside sandbox!")
 `
 	sb.Write(ctx, "/tmp/script.py", code)
-	result, err := sb.Execute(ctx, "python3 /tmp/script.py", nil)
+	result, err := sb.RunCommand(ctx, "python3 /tmp/script.py", nil, nil)
 	if err != nil {
 		log.Fatal(err)
 	}

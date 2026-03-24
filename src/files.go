@@ -89,7 +89,7 @@ func (s *Sandbox) ReadToBuffer(ctx context.Context, path string) ([]byte, error)
 
 // MkDir creates a directory (and all parents) inside the sandbox.
 func (s *Sandbox) MkDir(ctx context.Context, path string) error {
-	_, err := s.Execute(ctx, fmt.Sprintf("mkdir -p %q", path), nil)
+	_, err := s.RunCommand(ctx, fmt.Sprintf("mkdir -p %q", path), nil, nil)
 	return err
 }
 

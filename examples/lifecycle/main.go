@@ -52,8 +52,8 @@ func main() {
 	}
 	fmt.Printf("Get: status=%s, ip=%s\n", info.Status, info.IP)
 
-	// ── 延期 ─────────────────────────────────────────────
-	if err := sb.Extend(ctx, client, 12); err != nil {
+	// ── 延期 (12h = 43_200_000 ms) ────────────────────────
+	if err := sb.Extend(ctx, client, 43_200_000); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("Extended TTL by 12h")

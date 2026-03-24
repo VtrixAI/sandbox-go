@@ -53,18 +53,15 @@ type Spec struct {
 	Image  string `json:"image,omitempty"`
 }
 
-// ExecOptions configures a bash command execution.
-type ExecOptions struct {
+// RunOptions configures a command execution.
+type RunOptions struct {
 	WorkingDir string
 	TimeoutSec uint64
 	Env        map[string]string
 	Sudo       bool     // prepend "sudo -E" to the command
 	Stdin      string   // data written to the command's stdin
-	// Args are shell-quoted and appended to command: Execute("ls", &ExecOptions{Args: []string{"-la", "/tmp"}}).
-	// Prefer using Args over embedding arguments in the command string to avoid shell injection.
-	Args       []string
 	// Stdout, when non-nil, receives each stdout chunk as it arrives.
-	// Execute will use streaming internally and write to this writer.
+	// RunCommand will use streaming internally and write to this writer.
 	Stdout     io.Writer
 	// Stderr, when non-nil, receives each stderr chunk as it arrives.
 	Stderr     io.Writer
@@ -92,9 +89,10 @@ type StopOptions struct {
 
 // ExecResult is the final result of an exec call.
 type ExecResult struct {
-	CmdID    string `json:"cmd_id"`
-	Output   string `json:"output"`
-	ExitCode int    `json:"exit_code"`
+	CmdID     string `json:"cmd_id"`
+	Output    string `json:"output"`
+	ExitCode  int    `json:"exit_code"`
+	StartedAt string `json:"started_at"` // RFC3339 UTC; empty if not available
 }
 
 // ExecEvent is a streaming event emitted during exec.
@@ -106,8 +104,9 @@ type ExecEvent struct {
 
 // detachedResult is the internal wire result of a detached exec call.
 type detachedResult struct {
-	CmdID string `json:"cmd_id"`
-	PID   uint32 `json:"pid"`
+	CmdID     string `json:"cmd_id"`
+	PID       uint32 `json:"pid"`
+	StartedAt string `json:"started_at"` // RFC3339 UTC
 }
 
 // WriteFileEntry is a single file to write in WriteFiles.

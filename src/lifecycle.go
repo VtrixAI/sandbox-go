@@ -126,15 +126,18 @@ func (sb *Sandbox) Restart(ctx context.Context, c *Client) error {
 	return c.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/restart", nil)
 }
 
-// Extend extends the sandbox TTL. hours=0 uses the server default (12h).
-func (sb *Sandbox) Extend(ctx context.Context, c *Client, hours int) error {
+// Extend extends the sandbox TTL by durationMs milliseconds.
+// Pass 0 to use the server default (12h).
+func (sb *Sandbox) Extend(ctx context.Context, c *Client, durationMs int64) error {
+	hours := int(durationMs / 3_600_000)
 	return c.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/extend",
 		map[string]int{"hours": hours})
 }
 
-// ExtendTimeout extends the sandbox TTL and refreshes Info. hours=0 uses the server default (12h).
-func (sb *Sandbox) ExtendTimeout(ctx context.Context, c *Client, hours int) error {
-	if err := sb.Extend(ctx, c, hours); err != nil {
+// ExtendTimeout extends the sandbox TTL by durationMs milliseconds and refreshes Info.
+// Pass 0 to use the server default (12h).
+func (sb *Sandbox) ExtendTimeout(ctx context.Context, c *Client, durationMs int64) error {
+	if err := sb.Extend(ctx, c, durationMs); err != nil {
 		return err
 	}
 	return sb.Refresh(ctx, c)
@@ -142,6 +145,19 @@ func (sb *Sandbox) ExtendTimeout(ctx context.Context, c *Client, hours int) erro
 
 // Status returns the current status from the cached Info (call Refresh first for live data).
 func (sb *Sandbox) Status() string { return sb.Info.Status }
+
+// CreatedAt returns the sandbox creation time parsed from the cached Info.CreatedAt RFC3339 string.
+// Returns zero time if the field is empty or unparsable.
+func (sb *Sandbox) CreatedAt() time.Time {
+	if sb.Info.CreatedAt == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, sb.Info.CreatedAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
 
 // ExpireAt returns the sandbox expiry time from the cached Info (RFC3339).
 func (sb *Sandbox) ExpireAt() string { return sb.Info.ExpireAt }

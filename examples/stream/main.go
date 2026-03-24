@@ -26,13 +26,13 @@ func main() {
 
 	fmt.Println("Streaming output:")
 
-	events, resultCh, errCh := sb.ExecuteStream(ctx, `
+	events, resultCh, errCh := sb.RunCommandStream(ctx, `
 		for i in $(seq 1 5); do
 			echo "stdout line $i"
 			echo "stderr line $i" >&2
 			sleep 0.2
 		done
-	`, nil)
+	`, nil, nil)
 
 	// 实时消费事件
 	for ev := range events {

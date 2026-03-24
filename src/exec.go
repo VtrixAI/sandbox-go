@@ -8,14 +8,15 @@ import (
 	"time"
 )
 
-// Execute runs a bash command and returns the result as a CommandFinished.
+// RunCommand runs a command and returns the result as a CommandFinished.
+// args are shell-quoted and appended to cmd to avoid shell injection.
 // If opts.Stdout or opts.Stderr are set, output is streamed to those writers
 // as it arrives; execution still blocks until the command finishes.
-func (s *Sandbox) Execute(ctx context.Context, command string, opts *ExecOptions) (*CommandFinished, error) {
+func (s *Sandbox) RunCommand(ctx context.Context, cmd string, args []string, opts *RunOptions) (*CommandFinished, error) {
 	if opts != nil && (opts.Stdout != nil || opts.Stderr != nil) {
-		return s.executeWithWriters(ctx, command, opts)
+		return s.runCommandWithWriters(ctx, cmd, args, opts)
 	}
-	resp, err := s.call(ctx, "exec", s.buildExecParams(command, opts), nil)
+	resp, err := s.call(ctx, "exec", s.buildExecParams(cmd, args, opts), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -24,15 +25,15 @@ func (s *Sandbox) Execute(ctx context.Context, command string, opts *ExecOptions
 		return nil, fmt.Errorf("exec result parse: %w", err)
 	}
 	return &CommandFinished{
-		Command:  Command{CmdID: result.CmdID, sandbox: s, StartedAt: time.Now(), WorkingDir: workingDirOf(opts)},
+		Command:  Command{CmdID: result.CmdID, sandbox: s, StartedAt: parseStartedAt(result.StartedAt), WorkingDir: workingDirOf(opts)},
 		ExitCode: result.ExitCode,
 		Output:   result.Output,
 	}, nil
 }
 
-// executeWithWriters is the internal streaming path used when Stdout/Stderr writers are set.
-func (s *Sandbox) executeWithWriters(ctx context.Context, command string, opts *ExecOptions) (*CommandFinished, error) {
-	eventCh, resultCh, errCh := s.ExecuteStream(ctx, command, opts)
+// runCommandWithWriters is the internal streaming path used when Stdout/Stderr writers are set.
+func (s *Sandbox) runCommandWithWriters(ctx context.Context, cmd string, args []string, opts *RunOptions) (*CommandFinished, error) {
+	eventCh, resultCh, errCh := s.RunCommandStream(ctx, cmd, args, opts)
 	for ev := range eventCh {
 		switch ev.Type {
 		case "stdout":
@@ -51,10 +52,11 @@ func (s *Sandbox) executeWithWriters(ctx context.Context, command string, opts *
 	return <-resultCh, nil
 }
 
-// ExecuteStream runs a bash command and streams ExecEvents in real time.
+// RunCommandStream runs a command and streams ExecEvents in real time.
+// args are shell-quoted and appended to cmd.
 // eventCh is closed when the command finishes.
 // The final CommandFinished is sent on resultCh, or an error on errCh.
-func (s *Sandbox) ExecuteStream(ctx context.Context, command string, opts *ExecOptions) (<-chan ExecEvent, <-chan *CommandFinished, <-chan error) {
+func (s *Sandbox) RunCommandStream(ctx context.Context, cmd string, args []string, opts *RunOptions) (<-chan ExecEvent, <-chan *CommandFinished, <-chan error) {
 	eventCh := make(chan ExecEvent, 64)
 	resultCh := make(chan *CommandFinished, 1)
 	errCh := make(chan error, 1)
@@ -71,7 +73,7 @@ func (s *Sandbox) ExecuteStream(ctx context.Context, command string, opts *ExecO
 		}
 		callDone := make(chan callResult, 1)
 		go func() {
-			resp, err := s.call(ctx, "exec", s.buildExecParams(command, opts), stream)
+			resp, err := s.call(ctx, "exec", s.buildExecParams(cmd, args, opts), stream)
 			callDone <- callResult{resp, err}
 		}()
 
@@ -90,7 +92,7 @@ func (s *Sandbox) ExecuteStream(ctx context.Context, command string, opts *ExecO
 			return
 		}
 		resultCh <- &CommandFinished{
-			Command:  Command{CmdID: result.CmdID, sandbox: s, StartedAt: time.Now(), WorkingDir: workingDirOf(opts)},
+			Command:  Command{CmdID: result.CmdID, sandbox: s, StartedAt: parseStartedAt(result.StartedAt), WorkingDir: workingDirOf(opts)},
 			ExitCode: result.ExitCode,
 			Output:   result.Output,
 		}
@@ -99,10 +101,11 @@ func (s *Sandbox) ExecuteStream(ctx context.Context, command string, opts *ExecO
 	return eventCh, resultCh, errCh
 }
 
-// ExecuteDetached starts a command in background (detached) mode.
+// RunCommandDetached starts a command in background (detached) mode.
+// args are shell-quoted and appended to cmd.
 // Returns immediately with a Command object for tracking the running process.
-func (s *Sandbox) ExecuteDetached(ctx context.Context, command string, opts *ExecOptions) (*Command, error) {
-	params := s.buildExecParams(command, opts)
+func (s *Sandbox) RunCommandDetached(ctx context.Context, cmd string, args []string, opts *RunOptions) (*Command, error) {
+	params := s.buildExecParams(cmd, args, opts)
 	params["detached"] = true
 
 	resp, err := s.call(ctx, "exec", params, nil)
@@ -120,7 +123,7 @@ func (s *Sandbox) ExecuteDetached(ctx context.Context, command string, opts *Exe
 	return &Command{
 		CmdID:      result.CmdID,
 		PID:        result.PID,
-		StartedAt:  time.Now(),
+		StartedAt:  parseStartedAt(result.StartedAt),
 		WorkingDir: workingDir,
 		sandbox:    s,
 	}, nil
@@ -187,17 +190,17 @@ func (s *Sandbox) ExecLogs(ctx context.Context, cmdID string) (<-chan ExecEvent,
 	return eventCh, resultCh, errCh
 }
 
-func (s *Sandbox) buildExecParams(command string, opts *ExecOptions) map[string]any {
+func (s *Sandbox) buildExecParams(cmd string, args []string, opts *RunOptions) map[string]any {
 	// Append shell-quoted args to the command string if provided.
-	if opts != nil && len(opts.Args) > 0 {
-		parts := make([]string, 0, len(opts.Args)+1)
-		parts = append(parts, command)
-		for _, arg := range opts.Args {
+	if len(args) > 0 {
+		parts := make([]string, 0, len(args)+1)
+		parts = append(parts, cmd)
+		for _, arg := range args {
 			parts = append(parts, shellQuote(arg))
 		}
-		command = strings.Join(parts, " ")
+		cmd = strings.Join(parts, " ")
 	}
-	params := map[string]any{"command": command}
+	params := map[string]any{"command": cmd}
 
 	// start with sandbox-level default env
 	merged := make(map[string]string, len(s.defaultEnv))
@@ -237,9 +240,22 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
-func workingDirOf(opts *ExecOptions) string {
+func workingDirOf(opts *RunOptions) string {
 	if opts != nil {
 		return opts.WorkingDir
 	}
 	return ""
+}
+
+// parseStartedAt parses an RFC3339 string from the server into a time.Time.
+// Falls back to time.Now() when the string is empty or unparsable.
+func parseStartedAt(s string) time.Time {
+	if s == "" {
+		return time.Now()
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Now()
+	}
+	return t
 }
