@@ -39,7 +39,7 @@ func main() {
     }
     defer sb.Close()
 
-    result, err := sb.Execute(ctx, "echo hello && uname -a", nil)
+    result, err := sb.RunCommand(ctx, "echo hello && uname -a", nil, nil)
     if err != nil {
         log.Fatal(err)
     }
@@ -70,7 +70,7 @@ err        = client.Delete(ctx, id)                     // delete sandbox
 
 ```go
 // Blocking — waits for command to finish
-result, err := sb.Execute(ctx, "command", &sandbox.ExecOptions{
+result, err := sb.RunCommand(ctx, "command", nil, &sandbox.RunOptions{
     WorkingDir: "/tmp",
     TimeoutSec: 30,
     Env:        map[string]string{"FOO": "bar"},
@@ -80,7 +80,7 @@ result, err := sb.Execute(ctx, "command", &sandbox.ExecOptions{
 // result.ExitCode, result.Output, result.CmdID
 
 // Streaming — real-time stdout/stderr
-eventCh, resultCh, errCh := sb.ExecuteStream(ctx, "command", nil)
+eventCh, resultCh, errCh := sb.RunCommandStream(ctx, "command", nil, nil)
 for ev := range eventCh {
     // ev.Type: "start" | "stdout" | "stderr" | "done"
     // ev.Data
@@ -88,7 +88,7 @@ for ev := range eventCh {
 result := <-resultCh
 
 // Detached — fire and forget, returns immediately
-cmd, err := sb.ExecuteDetached(ctx, "long-running-command", nil)
+cmd, err := sb.RunCommandDetached(ctx, "long-running-command", nil, nil)
 // cmd.CmdID, cmd.PID
 
 // Command methods
@@ -101,6 +101,9 @@ err             = cmd.Kill(ctx, "SIGTERM")        // send signal
 
 // Reconnect to a known command
 cmd = sb.GetCommand(cmdID)
+
+// Attach to a running or completed command and replay its output
+eventCh, resultCh, errCh = sb.ExecLogs(ctx, cmdID)
 ```
 
 ### File Operations
@@ -113,9 +116,9 @@ result, err  = sb.Edit(ctx, "/path/to/file", "old text", "new text")
 
 // Binary files
 err = sb.WriteFiles(ctx, []sandbox.WriteFileEntry{
-    {Path: "/tmp/data.bin", Content: []byte{...}},
+    {Path: "/tmp/data.bin", Content: []byte{...}, Mode: 0o755},
 })
-data, err := sb.ReadToBuffer(ctx, "/path/to/file") // []byte
+data, err := sb.ReadToBuffer(ctx, "/path/to/file") // []byte or nil if not found
 
 // Directory
 err = sb.MkDir(ctx, "/path/to/dir")
@@ -132,7 +135,7 @@ downloaded, err = sb.DownloadFiles(ctx, []sandbox.DownloadEntry{
     {SandboxPath: "/a.txt", LocalPath: "a.txt"},
 }, nil)
 
-// Stream large files
+// Stream large files (chunked base64 decoding handled internally)
 chunkCh, resultCh, errCh := sb.ReadStream(ctx, "/large/file", 65536)
 for chunk := range chunkCh {
     // chunk.Data is base64-encoded bytes
@@ -149,10 +152,10 @@ err = sb.Refresh(ctx, client)
 err = sb.Stop(ctx, client, &sandbox.StopOptions{Blocking: true})
 err = sb.Start(ctx, client)
 err = sb.Restart(ctx, client)
-err = sb.Extend(ctx, client, 12)          // extend TTL by 12h
-err = sb.ExtendTimeout(ctx, client, 12)   // extend + refresh
+err = sb.Extend(ctx, client, 12*60*60*1000)      // extend TTL by 12h (milliseconds)
+err = sb.ExtendTimeout(ctx, client, 12*60*60*1000) // extend + refresh
 err = sb.Update(ctx, client, sandbox.UpdateOptions{...})
-err = sb.Configure(ctx, client)           // apply config to pod
+err = sb.Configure(ctx, client)                  // apply config to pod
 err = sb.Delete(ctx, client)
 
 status   := sb.Status()    // cached status string
@@ -165,7 +168,14 @@ See the [`examples/`](examples/) directory:
 
 | File | Description |
 |------|-------------|
-| `examples/basic/main.go` | Create sandbox, run commands |
-| `examples/stream/main.go` | Real-time streaming output |
-| `examples/files/main.go` | File read/write/edit/upload/download |
+| `examples/basic/main.go` | Create sandbox, run commands, detached exec |
+| `examples/stream/main.go` | Real-time streaming, exec_logs replay, Command.Logs/Stdout |
+| `examples/files/main.go` | File read/write/edit/upload/download/stream |
 | `examples/lifecycle/main.go` | Stop/start/extend/update/delete |
+| `examples/attach/main.go` | Reconnect to an existing sandbox by ID |
+
+Run an example:
+
+```bash
+cd examples/basic && go run main.go
+```

@@ -228,7 +228,7 @@ func (s *Sandbox) buildExecParams(cmd string, args []string, opts *RunOptions) m
 			params["sudo"] = true
 		}
 		if opts.Stdin != "" {
-			params["stdin"] = opts.Stdin
+			params["stdin_data"] = opts.Stdin
 		}
 	}
 	return params
