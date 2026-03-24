@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -86,11 +87,16 @@ func (s *Sandbox) ExecuteDetached(ctx context.Context, command string, opts *Exe
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
 		return nil, fmt.Errorf("exec detached result parse: %w", err)
 	}
+	workingDir := ""
+	if opts != nil {
+		workingDir = opts.WorkingDir
+	}
 	return &Command{
-		CmdID:     result.CmdID,
-		PID:       result.PID,
-		StartedAt: time.Now(),
-		sandbox:   s,
+		CmdID:      result.CmdID,
+		PID:        result.PID,
+		StartedAt:  time.Now(),
+		WorkingDir: workingDir,
+		sandbox:    s,
 	}, nil
 }
 
@@ -156,6 +162,15 @@ func (s *Sandbox) ExecLogs(ctx context.Context, cmdID string) (<-chan ExecEvent,
 }
 
 func (s *Sandbox) buildExecParams(command string, opts *ExecOptions) map[string]any {
+	// Append shell-quoted args to the command string if provided.
+	if opts != nil && len(opts.Args) > 0 {
+		parts := make([]string, 0, len(opts.Args)+1)
+		parts = append(parts, command)
+		for _, arg := range opts.Args {
+			parts = append(parts, shellQuote(arg))
+		}
+		command = strings.Join(parts, " ")
+	}
 	params := map[string]any{"command": command}
 
 	// start with sandbox-level default env
@@ -188,4 +203,10 @@ func (s *Sandbox) buildExecParams(command string, opts *ExecOptions) map[string]
 		}
 	}
 	return params
+}
+
+// shellQuote returns a single-quoted shell-safe version of s.
+// Single quotes are escaped by ending the quote, inserting a literal quote, and reopening.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }

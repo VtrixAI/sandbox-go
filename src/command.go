@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -16,10 +17,21 @@ type LogEvent struct {
 // Command represents a background command that may still be running.
 // Obtain via Sandbox.ExecuteDetached or Sandbox.GetCommand.
 type Command struct {
-	CmdID     string
-	PID       uint32
-	StartedAt time.Time
-	sandbox   *Sandbox
+	CmdID      string
+	PID        uint32
+	StartedAt  time.Time
+	WorkingDir string    // working directory the command was started in (empty if not known)
+	sandbox    *Sandbox
+	mu         sync.Mutex
+	exitCode   *int // nil while running; populated after Wait completes
+}
+
+// ExitCode returns the exit code if the command has finished, or nil if it is
+// still running. It is safe to call from multiple goroutines.
+func (c *Command) ExitCode() *int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.exitCode
 }
 
 // CommandFinished is the result of a completed command.
@@ -45,6 +57,11 @@ func (c *Command) Wait(ctx context.Context) (*CommandFinished, error) {
 	if result != nil {
 		finished.ExitCode = result.ExitCode
 		finished.Output = result.Output
+		// populate the live exitCode field so ExitCode() returns non-nil after Wait
+		c.mu.Lock()
+		ec := result.ExitCode
+		c.exitCode = &ec
+		c.mu.Unlock()
 	}
 	return finished, nil
 }

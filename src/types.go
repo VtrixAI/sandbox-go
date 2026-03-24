@@ -57,8 +57,11 @@ type ExecOptions struct {
 	WorkingDir string
 	TimeoutSec uint64
 	Env        map[string]string
-	Sudo       bool   // prepend "sudo -E" to the command
-	Stdin      string // data written to the command's stdin
+	Sudo       bool     // prepend "sudo -E" to the command
+	Stdin      string   // data written to the command's stdin
+	// Args are shell-quoted and appended to command: Execute("ls", &ExecOptions{Args: []string{"-la", "/tmp"}}).
+	// Prefer using Args over embedding arguments in the command string to avoid shell injection.
+	Args       []string
 }
 
 // DownloadOptions configures a DownloadFile call.
