@@ -2,13 +2,13 @@
 
 Go SDK for [Vtrix](https://github.com/VtrixAI) sandbox — run commands and manage files in isolated Linux environments over a persistent WebSocket connection.
 
+**Requires Go 1.21+**
+
 ## Installation
 
 ```bash
 go get github.com/VtrixAI/sandbox-go
 ```
-
-**Requires Go 1.21+**
 
 ## Quick Start
 
@@ -48,35 +48,52 @@ func main() {
 }
 ```
 
-## API Reference
+## Core types
 
-### Client
+| Type | What it does |
+|---|---|
+| [`Client`](#client) | Creates and manages sandbox instances |
+| [`Sandbox`](#sandbox) | Runs commands and manages files in an isolated environment |
+| [`Command`](#command) | Handles a running or completed process |
+| [`CommandFinished`](#command) | Result after a command completes — embeds `Command` and adds `ExitCode` and `Output` |
 
-#### `NewClient(opts ClientOptions) *Client`
+---
 
-Creates a new client. The client is reusable and safe for concurrent use.
+## Client
 
-| Field | Type | Description |
-|---|---|---|
-| `BaseURL` | `string` | Hermes gateway URL (e.g. `http://host:8080`). |
-| `Token` | `string` | Bearer token for authentication. |
-| `ServiceID` | `string` | Value sent as `X-Service-ID` header. |
-| `HTTPClient` | `*http.Client` | Optional custom HTTP client for proxy or TLS configuration. |
+### `NewClient(opts ClientOptions) *Client`
 
-#### `client.Create(ctx, opts) (*Sandbox, error)`
+Creates a new client. The client is reusable and safe for concurrent use across multiple sandbox sessions.
 
-Creates a new sandbox, polls until it becomes active, and opens a WebSocket connection. This is the primary entry point for starting a sandbox session.
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `BaseURL` | `string` | Yes | Hermes gateway URL (e.g. `http://host:8080`). |
+| `Token` | `string` | No | Bearer token for authentication. |
+| `ServiceID` | `string` | No | Value sent as `X-Service-ID` header. |
+| `HTTPClient` | `*http.Client` | No | Optional custom HTTP client for proxy or TLS configuration. |
 
-| Parameter | Type | Description |
-|---|---|---|
-| `opts.UserID` | `string` | Owner of the sandbox. |
-| `opts.Spec` | `*Spec` | Optional resource spec (`CPU`, `Memory`, `Image`). |
-| `opts.Labels` | `map[string]string` | Arbitrary key-value metadata attached to the sandbox. |
-| `opts.Payloads` | `[]Payload` | Initialisation calls sent to the pod after creation. |
-| `opts.TTLHours` | `int` | Sandbox lifetime in hours. Uses the server default when 0. |
-| `opts.Env` | `map[string]string` | Default environment variables inherited by all commands. Per-command `RunOptions.Env` values override these. |
+```go
+client := sandbox.NewClient(sandbox.ClientOptions{
+    BaseURL:   "http://your-hermes-host:8080",
+    Token:     "your-token",
+    ServiceID: "your-service-id",
+})
+```
+
+### `client.Create(ctx, opts) (*Sandbox, error)`
+
+Use `client.Create()` to launch a new sandbox, poll until it is active, and open a WebSocket connection. This is the primary entry point for starting a sandbox session. Pass `Env` to set default environment variables that all commands in this sandbox will inherit.
 
 **Returns:** `(*Sandbox, error)`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `opts.UserID` | `string` | Yes | Owner of the sandbox. |
+| `opts.Spec` | `*Spec` | No | Resource spec (`CPU`, `Memory`, `Image`). |
+| `opts.Labels` | `map[string]string` | No | Arbitrary key-value metadata attached to the sandbox. |
+| `opts.Payloads` | `[]Payload` | No | Initialisation calls sent to the pod after creation. |
+| `opts.TTLHours` | `int` | No | Sandbox lifetime in hours. Uses the server default when `0`. |
+| `opts.Env` | `map[string]string` | No | Default environment variables inherited by all commands. Per-command `RunOptions.Env` values override these. |
 
 ```go
 sb, err := client.Create(ctx, sandbox.CreateOptions{
@@ -87,60 +104,122 @@ sb, err := client.Create(ctx, sandbox.CreateOptions{
 })
 ```
 
-#### `client.Attach(ctx, sandboxID, token, serviceID) (*Sandbox, error)`
+### `client.Attach(ctx, sandboxID, token, serviceID) (*Sandbox, error)`
 
-Connects to an existing sandbox without creating a new one. Use this to resume a session after a restart or to connect from a different process. Pass empty strings for `token` and `serviceID` to fall back to the client-level values.
+Use `client.Attach()` to connect to an existing sandbox without creating a new one. Use this to resume a session after a restart or to connect from a different goroutine. Pass empty strings for `token` and `serviceID` to fall back to the client-level values.
 
 **Returns:** `(*Sandbox, error)`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `sandboxID` | `string` | Yes | ID of the sandbox to connect to. |
+| `token` | `string` | No | Override the client-level token. Pass `""` to use the default. |
+| `serviceID` | `string` | No | Override the client-level service ID. Pass `""` to use the default. |
 
 ```go
 sb, err := client.Attach(ctx, "sandbox-id-abc", "", "")
 ```
 
-#### `client.List(ctx, opts) (*ListResult, error)`
+### `client.List(ctx, opts) (*ListResult, error)`
 
-Lists sandboxes visible to the current credentials. Filter by `UserID` or `Status` to scope results.
-
-| Parameter | Type | Description |
-|---|---|---|
-| `opts.UserID` | `string` | Return only sandboxes owned by this user. |
-| `opts.Status` | `string` | Filter by status: `"active"`, `"stopped"`, etc. |
-| `opts.Limit` | `int` | Maximum number of results. |
-| `opts.Offset` | `int` | Pagination offset. |
+Use `client.List()` to enumerate sandboxes visible to the current credentials. Filter by `UserID` or `Status` to scope results.
 
 **Returns:** `(*ListResult, error)` — `ListResult.Items` is `[]Info`, `ListResult.Pagination` has `Total`, `Limit`, `Offset`, `HasMore`.
 
-#### `client.Get(ctx, sandboxID) (*Info, error)`
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `opts.UserID` | `string` | No | Return only sandboxes owned by this user. |
+| `opts.Status` | `string` | No | Filter by status: `"active"`, `"stopped"`, etc. |
+| `opts.Limit` | `int` | No | Maximum number of results. |
+| `opts.Offset` | `int` | No | Pagination offset. |
 
-Fetches metadata for a sandbox by ID without opening a WebSocket connection.
+```go
+result, err := client.List(ctx, sandbox.ListOptions{UserID: "user-123", Status: "active"})
+fmt.Printf("Found %d sandboxes\n", result.Pagination.Total)
+```
+
+### `client.Get(ctx, sandboxID) (*Info, error)`
+
+Use `client.Get()` to fetch metadata for a sandbox by ID without opening a WebSocket connection.
 
 **Returns:** `(*Info, error)`
 
-#### `client.Delete(ctx, sandboxID) error`
+```go
+info, err := client.Get(ctx, "sandbox-id-abc")
+fmt.Println(info.Status)
+```
 
-Permanently deletes a sandbox. This cannot be undone.
+### `client.Delete(ctx, sandboxID) error`
+
+Call `client.Delete()` to permanently delete a sandbox. This cannot be undone.
+
+**Returns:** `error`
+
+```go
+err := client.Delete(ctx, "sandbox-id-abc")
+```
 
 ---
 
-### Running Commands
+## Sandbox
 
-#### `sandbox.RunCommand(ctx, cmd, args, opts) (*CommandFinished, error)`
+A `*Sandbox` gives you full control over an isolated environment. You receive one from `client.Create()` or `client.Attach()`.
 
-Runs a command and blocks until it finishes. Set `opts.Stdout` or `opts.Stderr` to receive output in real time while still blocking for the final result — useful for progress logging.
+### Methods
 
-| Parameter | Type | Description |
-|---|---|---|
-| `cmd` | `string` | Shell command to run. |
-| `args` | `[]string` | Arguments shell-quoted and appended to `cmd`. Prevents injection. |
-| `opts.WorkingDir` | `string` | Working directory inside the sandbox. |
-| `opts.TimeoutSec` | `uint64` | Kill the command after this many seconds. |
-| `opts.Env` | `map[string]string` | Per-command environment variables. Merges with sandbox defaults. |
-| `opts.Sudo` | `bool` | Prepend `sudo -E` to the command. |
-| `opts.Stdin` | `string` | Data written to the command's stdin before reading output. |
-| `opts.Stdout` | `io.Writer` | Receives stdout chunks as they arrive. |
-| `opts.Stderr` | `io.Writer` | Receives stderr chunks as they arrive. |
+#### `sandbox.Status() string`
+
+The `Status()` method returns the cached lifecycle state of the sandbox. Call `sandbox.Refresh(ctx, client)` first if you need a live value.
+
+**Returns:** `string` — `"active"`, `"stopped"`, `"destroying"`, etc.
+
+```go
+fmt.Println(sb.Status())
+```
+
+#### `sandbox.ExpireAt() string`
+
+`ExpireAt()` returns the cached expiry timestamp. Call `sandbox.Refresh(ctx, client)` first for an accurate value.
+
+**Returns:** `string` — RFC 3339 timestamp.
+
+```go
+fmt.Println(sb.ExpireAt())
+```
+
+#### `sandbox.Timeout() int64`
+
+`Timeout()` returns the remaining sandbox lifetime in milliseconds based on the cached `ExpireAt`. Returns `0` if the sandbox has already expired. Compare against upcoming commands and call `sandbox.ExtendTimeout()` if the window is too short.
+
+**Returns:** `int64` — milliseconds remaining; `0` if expired.
+
+```go
+if sb.Timeout() < 60_000 {
+    sb.ExtendTimeout(ctx, client, 30*60*1000)
+}
+```
+
+---
+
+## Running Commands
+
+### `sandbox.RunCommand(ctx, cmd, args, opts) (*CommandFinished, error)`
+
+`sandbox.RunCommand()` executes a command and blocks until it finishes. Set `opts.Stdout` or `opts.Stderr` to receive output in real time while still blocking — useful for progress logging.
 
 **Returns:** `(*CommandFinished, error)` — `ExitCode`, `Output`, `CmdID`.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `cmd` | `string` | Yes | Shell command to run. |
+| `args` | `[]string` | No | Arguments shell-quoted and appended to `cmd`. Prevents injection. |
+| `opts.WorkingDir` | `string` | No | Working directory inside the sandbox. |
+| `opts.TimeoutSec` | `uint64` | No | Kill the command after this many seconds. |
+| `opts.Env` | `map[string]string` | No | Per-command environment variables. Merges with sandbox defaults. |
+| `opts.Sudo` | `bool` | No | Prepend `sudo -E` to the command. |
+| `opts.Stdin` | `string` | No | Data written to the command's stdin before reading output. |
+| `opts.Stdout` | `io.Writer` | No | Receives stdout chunks as they arrive. |
+| `opts.Stderr` | `io.Writer` | No | Receives stderr chunks as they arrive. |
 
 ```go
 result, err := sb.RunCommand(ctx, "npm install", nil, &sandbox.RunOptions{
@@ -148,13 +227,19 @@ result, err := sb.RunCommand(ctx, "npm install", nil, &sandbox.RunOptions{
     Stdout:     os.Stdout,
     Stderr:     os.Stderr,
 })
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("exit_code=%d\n", result.ExitCode)
 ```
 
-#### `sandbox.RunCommandStream(ctx, cmd, args, opts) (<-chan ExecEvent, <-chan *CommandFinished, <-chan error)`
+### `sandbox.RunCommandStream(ctx, cmd, args, opts) (<-chan ExecEvent, <-chan *CommandFinished, <-chan error)`
 
-Runs a command and streams `ExecEvent` values in real time. Use this instead of `RunCommand` when you need to process stdout and stderr as separate, typed events (e.g. to display them with different colours).
+Use `sandbox.RunCommandStream()` to run a command and stream `ExecEvent` values in real time. Use this instead of `RunCommand` when you need to process stdout and stderr as separate, typed events — for example, to display them with different colours or route them to different log streams.
 
 `eventCh` is closed when the command finishes. Read the final result from `resultCh` or check `errCh` for errors.
+
+**Returns:** `(<-chan ExecEvent, <-chan *CommandFinished, <-chan error)`
 
 | `ExecEvent.Type` | Meaning |
 |---|---|
@@ -181,9 +266,9 @@ case err := <-errCh:
 }
 ```
 
-#### `sandbox.RunCommandDetached(ctx, cmd, args, opts) (*Command, error)`
+### `sandbox.RunCommandDetached(ctx, cmd, args, opts) (*Command, error)`
 
-Starts a command in the background and returns immediately. Use this for long-running processes such as servers or build jobs where you want to do other work while the command runs, then call `cmd.Wait()` when you need the result.
+Use `sandbox.RunCommandDetached()` to start a command in the background and return immediately. Use this for long-running processes such as servers where you want to do other work while the command runs, then call `cmd.Wait()` when you need the result.
 
 **Returns:** `(*Command, error)` — `CmdID`, `PID`, `StartedAt`, `WorkingDir`.
 
@@ -192,53 +277,95 @@ cmd, err := sb.RunCommandDetached(ctx, "python server.py", nil, &sandbox.RunOpti
     WorkingDir: "/app",
     Env:        map[string]string{"PORT": "8080"},
 })
+if err != nil {
+    log.Fatal(err)
+}
 // ... do other work ...
 finished, err := cmd.Wait(ctx)
 ```
 
-#### `sandbox.ExecLogs(ctx, cmdID) (<-chan ExecEvent, <-chan *ExecResult, <-chan error)`
+### `sandbox.ExecLogs(ctx, cmdID) (<-chan ExecEvent, <-chan *ExecResult, <-chan error)`
 
-Attaches to a running or completed command and streams its output. Replays buffered output first (up to 512 KB), then streams live events for commands still running. Use this to replay logs from a detached command or to attach a second observer.
+Use `sandbox.ExecLogs()` to attach to a running or completed command and stream its output. It replays buffered output first (up to 512 KB), then streams live events for commands still running. Use this to replay logs from a detached command or to attach a second observer.
 
-**Returns:** Three channels: events, final result, error.
+**Returns:** `(<-chan ExecEvent, <-chan *ExecResult, <-chan error)`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `cmdID` | `string` | Yes | ID of the command to attach to. |
 
 ```go
 eventCh, resultCh, errCh := sb.ExecLogs(ctx, cmd.CmdID)
 for ev := range eventCh {
     fmt.Printf("[%s] %s", ev.Type, ev.Data)
 }
+if err := <-errCh; err != nil {
+    log.Fatal(err)
+}
+_ = <-resultCh
 ```
 
-#### `sandbox.GetCommand(cmdID) *Command`
+### `sandbox.GetCommand(cmdID) *Command`
 
-Reconstructs a `Command` handle from a known `cmdID`. Use this to reconnect to a command started in a previous call or a different goroutine without going through `RunCommandDetached` again.
+Use `sandbox.GetCommand()` to reconstruct a `*Command` handle from a known `cmdID`. Use this to reconnect to a command started in a previous call or a different goroutine without going through `RunCommandDetached` again.
 
 **Returns:** `*Command`
 
-#### `sandbox.Kill(ctx, cmdID, signal) error`
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `cmdID` | `string` | Yes | ID of the command to retrieve. |
 
-Sends a signal to a running command by ID. The signal is sent to the entire process group, so child processes are also terminated.
+```go
+cmd := sb.GetCommand("cmd-id-abc")
+result, err := cmd.Wait(ctx)
+```
 
-| Parameter | Type | Description |
-|---|---|---|
-| `cmdID` | `string` | ID of the command to signal. |
-| `signal` | `string` | Signal name: `"SIGTERM"` (default), `"SIGKILL"`, `"SIGINT"`, `"SIGHUP"`. |
+### `sandbox.Kill(ctx, cmdID, signal) error`
+
+Call `sandbox.Kill()` to send a signal to a running command by ID. The signal is sent to the entire process group, so child processes are also terminated. Send `SIGTERM` for graceful shutdown or `SIGKILL` for immediate termination.
+
+**Returns:** `error`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `cmdID` | `string` | Yes | ID of the command to signal. |
+| `signal` | `string` | No | Signal name: `"SIGTERM"` (default), `"SIGKILL"`, `"SIGINT"`, `"SIGHUP"`. |
+
+```go
+err := sb.Kill(ctx, cmd.CmdID, "SIGTERM")
+```
 
 ---
 
-### Command
+## Command
 
-A `Command` represents a running or completed process. You receive one from `RunCommandDetached` or `GetCommand`. `CommandFinished` embeds `Command` and adds `ExitCode` and `Output`.
+A `*Command` represents a running or completed process. You receive one from `RunCommandDetached` or `GetCommand`. `CommandFinished` embeds `Command` and adds `ExitCode` and `Output`.
 
-#### `command.Wait(ctx) (*CommandFinished, error)`
+**Fields:** `CmdID string`, `PID int`, `WorkingDir string`, `StartedAt time.Time`.
 
-Blocks until the command finishes and returns the final result. Essential after `RunCommandDetached` when you need the exit code or output.
+### `command.Wait(ctx) (*CommandFinished, error)`
+
+Use `command.Wait()` to block until a detached command finishes and get the resulting `*CommandFinished` object. This method is essential after `RunCommandDetached` when you need the exit code or output.
 
 **Returns:** `(*CommandFinished, error)` — `ExitCode`, `Output`, `CmdID`.
 
-#### `command.Logs(ctx) (<-chan LogEvent, <-chan error)`
+```go
+cmd, _ := sb.RunCommandDetached(ctx, "python server.py", nil, nil)
+// ... do other work ...
+result, err := cmd.Wait(ctx)
+if err != nil {
+    log.Fatal(err)
+}
+if result.ExitCode != 0 {
+    fmt.Println("Command failed:", result.Output)
+}
+```
 
-Streams structured log entries as they arrive. Each `LogEvent` has `Stream` (`"stdout"` or `"stderr"`) and `Data`. Use this instead of `ExecLogs` when you already have a `Command` handle.
+### `command.Logs(ctx) (<-chan LogEvent, <-chan error)`
+
+Call `command.Logs()` to stream structured log entries as they arrive. Each `LogEvent` has `Stream` (`"stdout"` or `"stderr"`) and `Data`. Use this instead of `sandbox.ExecLogs()` when you already have a `*Command` handle.
+
+**Returns:** `(<-chan LogEvent, <-chan error)`
 
 ```go
 logCh, errCh := cmd.Logs(ctx)
@@ -250,76 +377,134 @@ if err := <-errCh; err != nil {
 }
 ```
 
-#### `command.Stdout(ctx) (string, error)`
+### `command.Stdout(ctx) (string, error)`
 
-Collects the full standard output as a string. Call this after `Wait()` when you need to parse the complete output rather than process it line by line.
-
-**Returns:** `(string, error)`
-
-#### `command.Stderr(ctx) (string, error)`
-
-Collects the full standard error output as a string.
+Use `command.Stdout()` to collect the full standard output as a string. Call this after `Wait()` when you need to parse the complete output rather than process it line by line.
 
 **Returns:** `(string, error)`
 
-#### `command.CollectOutput(ctx, stream) (string, error)`
+```go
+out, err := cmd.Stdout(ctx)
+if err != nil {
+    log.Fatal(err)
+}
+var data map[string]any
+json.Unmarshal([]byte(out), &data)
+```
 
-Collects stdout, stderr, or both as a single string.
+### `command.Stderr(ctx) (string, error)`
 
-| Parameter | Type | Description |
-|---|---|---|
-| `stream` | `string` | `"stdout"`, `"stderr"`, or `"both"`. |
+Use `command.Stderr()` to collect the full standard error output as a string. Combine with `ExitCode` to build user-friendly error messages.
 
 **Returns:** `(string, error)`
 
-#### `command.Kill(ctx, signal) error`
+```go
+errOut, err := cmd.Stderr(ctx)
+if errOut != "" {
+    fmt.Fprintln(os.Stderr, "Command errors:", errOut)
+}
+```
 
-Sends a signal to this command. See `sandbox.Kill` for valid signal names.
+### `command.CollectOutput(ctx, stream) (string, error)`
+
+Use `command.CollectOutput()` to collect stdout, stderr, or both as a single string. Choose `"both"` for combined output, or specify the stream you need to process separately.
+
+**Returns:** `(string, error)`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `stream` | `string` | Yes | `"stdout"`, `"stderr"`, or `"both"`. |
+
+```go
+combined, err := cmd.CollectOutput(ctx, "both")
+```
+
+### `command.Kill(ctx, signal) error`
+
+Call `command.Kill()` to send a signal to this command. See `sandbox.Kill()` for valid signal names.
+
+**Returns:** `error`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `signal` | `string` | No | Signal name: `"SIGTERM"` (default), `"SIGKILL"`, `"SIGINT"`, `"SIGHUP"`. |
+
+```go
+err := cmd.Kill(ctx, "SIGKILL")
+```
 
 ---
 
-### File Operations
+## File Operations
 
-#### `sandbox.Read(ctx, path) (*ReadResult, error)`
+### `sandbox.Read(ctx, path) (*ReadResult, error)`
 
-Reads a file from the sandbox. Text files up to 200 KB are returned in full; larger files are truncated (`Truncated: true`). Image files are detected automatically and returned as base64-encoded data with a MIME type. Returns an error if the file does not exist.
+Use `sandbox.Read()` to read a file from the sandbox. Text files up to 200 KB are returned in full; larger files are truncated (`Truncated: true`). Image files are detected automatically and returned as base64-encoded data with a MIME type. Returns an error if the file does not exist.
+
+**Returns:** `(*ReadResult, error)`
 
 | Field | Type | Description |
 |---|---|---|
 | `Type` | `string` | `"text"` or `"image"`. |
 | `Content` | `string` | File content (text files). |
-| `Truncated` | `bool` | `true` if the file was larger than 200 KB and content was cut. Use `ReadStream` for full content. |
+| `Truncated` | `bool` | `true` if the file was larger than 200 KB. Use `ReadStream` for the full content. |
 | `Data` | `string` | Base64-encoded bytes (image files). |
 | `MimeType` | `string` | MIME type (image files, e.g. `"image/png"`). |
 
 ```go
 result, err := sb.Read(ctx, "/app/config.json")
+if err != nil {
+    log.Fatal(err)
+}
 if result.Truncated {
     // use ReadStream for the full file
 }
+fmt.Println(result.Content)
 ```
 
-#### `sandbox.Write(ctx, path, content) (*WriteResult, error)`
+### `sandbox.Write(ctx, path, content) (*WriteResult, error)`
 
-Writes a text string to a file. Creates parent directories automatically. Returns the number of bytes written.
+Use `sandbox.Write()` to write a text string to a file. Creates parent directories automatically. Returns the number of bytes written.
 
 **Returns:** `(*WriteResult, error)` — `BytesWritten`.
 
-#### `sandbox.Edit(ctx, path, oldText, newText) (*EditResult, error)`
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | `string` | Yes | Destination path inside the sandbox. |
+| `content` | `string` | Yes | Text content to write. |
 
-Replaces an exact occurrence of `oldText` with `newText` inside a file. Returns an error if `oldText` appears zero times or more than once — ensuring the edit is unambiguous.
+```go
+result, err := sb.Write(ctx, "/app/config.json", string(configJSON))
+fmt.Printf("Wrote %d bytes\n", result.BytesWritten)
+```
+
+### `sandbox.Edit(ctx, path, oldText, newText) (*EditResult, error)`
+
+Use `sandbox.Edit()` to replace an exact occurrence of `oldText` with `newText` inside a file. Returns an error if `oldText` appears zero times or more than once — ensuring the edit is unambiguous.
 
 **Returns:** `(*EditResult, error)` — `Message`.
 
-#### `sandbox.WriteFiles(ctx, files) error`
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | `string` | Yes | Path to the file inside the sandbox. |
+| `oldText` | `string` | Yes | The exact text to find and replace. |
+| `newText` | `string` | Yes | The text to substitute in its place. |
 
-Writes one or more binary files in a single round trip. Creates parent directories automatically. Use this for uploading compiled binaries, images, or executable scripts.
+```go
+_, err := sb.Edit(ctx, "/app/config.json", `"port": 3000`, `"port": 8080`)
+```
 
-| Parameter | Type | Description |
-|---|---|---|
-| `files[].Path` | `string` | Destination path inside the sandbox. |
-| `files[].Content` | `[]byte` | Raw file bytes. |
-| `files[].Mode` | `uint32` | Unix permission bits (e.g. `0o755` for executable). Uses server default when 0. |
+### `sandbox.WriteFiles(ctx, files) error`
+
+Use `sandbox.WriteFiles()` to upload one or more binary files in a single round trip. Creates parent directories automatically. Use this for uploading compiled binaries, images, or executable scripts.
+
+**Returns:** `error`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `files[].Path` | `string` | Yes | Destination path inside the sandbox. |
+| `files[].Content` | `[]byte` | Yes | Raw file bytes. |
+| `files[].Mode` | `uint32` | No | Unix permission bits (e.g. `0o755` for executable). Uses server default when `0`. |
 
 ```go
 err := sb.WriteFiles(ctx, []sandbox.WriteFileEntry{
@@ -328,20 +513,36 @@ err := sb.WriteFiles(ctx, []sandbox.WriteFileEntry{
 })
 ```
 
-#### `sandbox.ReadToBuffer(ctx, path) ([]byte, error)`
+### `sandbox.ReadToBuffer(ctx, path) ([]byte, error)`
 
-Reads a file into memory as raw bytes. Returns `nil` (not an error) when the file does not exist, making it easy to check for optional files without error handling.
+Use `sandbox.ReadToBuffer()` to read a file into memory as raw bytes. Returns `nil` (not an error) when the file does not exist, making it easy to check for optional files without error branching.
 
 **Returns:** `([]byte, error)` — `nil` if the file does not exist.
 
-#### `sandbox.ReadStream(ctx, path, chunkSize) (<-chan ReadStreamChunk, <-chan ReadStreamResult, <-chan error)`
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | `string` | Yes | File path inside the sandbox. |
 
-Reads a large file in chunks. Use this instead of `Read` when the file exceeds 200 KB or you need the complete binary content without truncation. Each chunk's `Data` field is base64-encoded.
+```go
+buf, err := sb.ReadToBuffer(ctx, "/app/output.bin")
+if err != nil {
+    log.Fatal(err)
+}
+if buf != nil {
+    process(buf)
+}
+```
 
-| Parameter | Type | Description |
-|---|---|---|
-| `path` | `string` | File path inside the sandbox. |
-| `chunkSize` | `int` | Bytes per chunk. Pass `0` for the server default (65536). |
+### `sandbox.ReadStream(ctx, path, chunkSize) (<-chan ReadStreamChunk, <-chan ReadStreamResult, <-chan error)`
+
+Use `sandbox.ReadStream()` to read a large file in chunks. Use this instead of `Read` when the file exceeds 200 KB or you need complete binary content without truncation. Each chunk's `Data` field is base64-encoded.
+
+**Returns:** `(<-chan ReadStreamChunk, <-chan ReadStreamResult, <-chan error)`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | `string` | Yes | File path inside the sandbox. |
+| `chunkSize` | `int` | No | Bytes per chunk. Pass `0` for the server default (65536). |
 
 ```go
 chunkCh, resultCh, errCh := sb.ReadStream(ctx, "/data/large.csv", 0)
@@ -350,21 +551,51 @@ for chunk := range chunkCh {
     decoded, _ := base64.StdEncoding.DecodeString(chunk.Data)
     f.Write(decoded)
 }
+if err := <-errCh; err != nil {
+    log.Fatal(err)
+}
 ```
 
-#### `sandbox.MkDir(ctx, path) error`
+### `sandbox.MkDir(ctx, path) error`
 
-Creates a directory and all parent directories. Safe to call on paths that already exist.
+Use `sandbox.MkDir()` to create a directory and all parent directories. Safe to call on paths that already exist.
 
-#### `sandbox.ListFiles(ctx, path) ([]FileEntry, error)`
+**Returns:** `error`
 
-Lists the contents of a directory. Returns an error if the path does not exist or is not a directory.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | `string` | Yes | Directory to create. |
 
-Each `FileEntry` has: `Name`, `Path`, `Size`, `IsDir`, `ModifiedAt` (RFC 3339 or `nil`).
+```go
+err := sb.MkDir(ctx, "/app/logs")
+```
 
-#### `sandbox.Stat(ctx, path) (*FileInfo, error)`
+### `sandbox.ListFiles(ctx, path) ([]FileEntry, error)`
 
-Returns metadata for a path. Unlike most operations, this does **not** error when the path does not exist — check `FileInfo.Exists` instead.
+Use `sandbox.ListFiles()` to list the contents of a directory. Returns an error if the path does not exist or is not a directory.
+
+**Returns:** `([]FileEntry, error)` — each entry has `Name`, `Path`, `Size`, `IsDir`, `ModifiedAt` (RFC 3339 or `nil`).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | `string` | Yes | Directory path inside the sandbox. |
+
+```go
+entries, err := sb.ListFiles(ctx, "/app")
+for _, entry := range entries {
+    prefix := "f"
+    if entry.IsDir {
+        prefix = "d"
+    }
+    fmt.Printf("%s %s\n", prefix, entry.Name)
+}
+```
+
+### `sandbox.Stat(ctx, path) (*FileInfo, error)`
+
+Use `sandbox.Stat()` to get metadata for a path. Unlike most operations, this does **not** return an error when the path does not exist — check `FileInfo.Exists` instead.
+
+**Returns:** `(*FileInfo, error)`
 
 | Field | Type | Description |
 |---|---|---|
@@ -374,112 +605,223 @@ Returns metadata for a path. Unlike most operations, this does **not** error whe
 | `Size` | `int64` | File size in bytes. |
 | `ModifiedAt` | `*string` | RFC 3339 timestamp, or `nil`. |
 
-#### `sandbox.Exists(ctx, path) (bool, error)`
+```go
+info, err := sb.Stat(ctx, "/app/config.json")
+if err != nil {
+    log.Fatal(err)
+}
+if !info.Exists {
+    sb.Write(ctx, "/app/config.json", "{}")
+}
+```
 
-Returns `true` if the path exists (file or directory). A convenient shorthand for `Stat` when you only need the existence check.
+### `sandbox.Exists(ctx, path) (bool, error)`
 
-#### `sandbox.UploadFile(ctx, localPath, sandboxPath, opts) error`
+Use `sandbox.Exists()` to check whether a path exists. A convenient shorthand for `Stat` when you only need the existence check.
 
-Uploads a file from the local filesystem into the sandbox.
+**Returns:** `(bool, error)`
 
-| Parameter | Type | Description |
-|---|---|---|
-| `opts.MkdirRecursive` | `bool` | Create parent directories on the sandbox side if they do not exist. |
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | `string` | Yes | Path to check. |
 
-#### `sandbox.DownloadFile(ctx, sandboxPath, localPath, opts) (string, error)`
+```go
+exists, err := sb.Exists(ctx, "/app/config.json")
+if exists {
+    // ...
+}
+```
 
-Downloads a file from the sandbox to the local filesystem. Returns the absolute local path on success, or `""` when the sandbox file does not exist.
+### `sandbox.UploadFile(ctx, localPath, sandboxPath, opts) error`
 
-| Parameter | Type | Description |
-|---|---|---|
-| `opts.MkdirRecursive` | `bool` | Create local parent directories if they do not exist. |
+Use `sandbox.UploadFile()` to upload a file from the local filesystem into the sandbox.
+
+**Returns:** `error`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `localPath` | `string` | Yes | Absolute path on the local machine. |
+| `sandboxPath` | `string` | Yes | Destination path inside the sandbox. |
+| `opts.MkdirRecursive` | `bool` | No | Create parent directories on the sandbox side if they do not exist. |
+
+```go
+err := sb.UploadFile(ctx, "/local/model.bin", "/app/model.bin", sandbox.UploadOptions{MkdirRecursive: true})
+```
+
+### `sandbox.DownloadFile(ctx, sandboxPath, localPath, opts) (string, error)`
+
+Use `sandbox.DownloadFile()` to download a file from the sandbox to the local filesystem. Returns the absolute local path on success, or `""` when the sandbox file does not exist.
 
 **Returns:** `(string, error)` — empty string if the file does not exist.
 
-#### `sandbox.DownloadFiles(ctx, entries, opts) (map[string]string, error)`
-
-Downloads multiple files in parallel. Returns a map of sandbox path → local path for each file that was successfully downloaded.
-
-#### `sandbox.Domain(port) string`
-
-Returns the publicly accessible URL for an exposed port. The sandbox must have been created with this port declared.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `sandboxPath` | `string` | Yes | Path to the file inside the sandbox. |
+| `localPath` | `string` | Yes | Destination path on the local machine. |
+| `opts.MkdirRecursive` | `bool` | No | Create local parent directories if they do not exist. |
 
 ```go
-url := sb.Domain(3000) // "https://3000-preview.example.com"
+dst, err := sb.DownloadFile(ctx, "/app/output.json", "/tmp/output.json", nil)
+if dst != "" {
+    fmt.Printf("Saved to %s\n", dst)
+}
+```
+
+### `sandbox.DownloadFiles(ctx, entries, opts) (map[string]string, error)`
+
+Use `sandbox.DownloadFiles()` to download multiple files in parallel. Returns a map of sandbox path → local path for each file that was successfully downloaded.
+
+**Returns:** `(map[string]string, error)`
+
+```go
+results, err := sb.DownloadFiles(ctx, []sandbox.DownloadEntry{
+    {SandboxPath: "/app/out.json", LocalPath: "/tmp/out.json"},
+    {SandboxPath: "/app/log.txt", LocalPath: "/tmp/log.txt"},
+}, nil)
+```
+
+### `sandbox.Domain(port) string`
+
+Use `sandbox.Domain()` to get the publicly accessible URL for an exposed port. The sandbox must be created with this port declared.
+
+**Returns:** `string`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `port` | `int` | Yes | Port number to resolve. |
+
+```go
+url := sb.Domain(3000)
+fmt.Printf("App running at %s\n", url)
 ```
 
 ---
 
-### Lifecycle
+## Lifecycle
 
-#### `sandbox.Refresh(ctx, client) error`
+### `sandbox.Refresh(ctx, client) error`
 
-Re-fetches the sandbox metadata from the server and updates `sb.Info`. Call this before reading `Status()` or `ExpireAt()` if you need current values.
+Call `sandbox.Refresh()` to re-fetch sandbox metadata from the server and update `sb.Info`. Call this before reading `Status()` or `ExpireAt()` if you need current values.
 
-#### `sandbox.Stop(ctx, client, opts) error`
+**Returns:** `error`
 
-Pauses the sandbox without deleting it. Set `opts.Blocking` to wait until the sandbox reaches `"stopped"` or `"failed"` status before returning.
+```go
+if err := sb.Refresh(ctx, client); err != nil {
+    log.Fatal(err)
+}
+fmt.Println(sb.Status())
+```
 
-| Parameter | Type | Description |
-|---|---|---|
-| `opts.Blocking` | `bool` | Poll until the sandbox has stopped. |
-| `opts.PollInterval` | `time.Duration` | How often to poll. Defaults to 2s. |
-| `opts.Timeout` | `time.Duration` | Maximum time to wait. Defaults to 5 minutes. |
+### `sandbox.Stop(ctx, client, opts) error`
 
-#### `sandbox.Start(ctx, client) error`
+Call `sandbox.Stop()` to pause the sandbox without deleting it. Set `opts.Blocking` to wait until the sandbox reaches `"stopped"` or `"failed"` status before returning.
 
-Resumes a stopped sandbox.
+**Returns:** `error`
 
-#### `sandbox.Restart(ctx, client) error`
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `opts.Blocking` | `bool` | No | Poll until the sandbox has stopped. |
+| `opts.PollInterval` | `time.Duration` | No | How often to poll. Defaults to `2s`. |
+| `opts.Timeout` | `time.Duration` | No | Maximum time to wait. Defaults to `5 minutes`. |
 
-Stops and restarts the sandbox.
+```go
+err := sb.Stop(ctx, client, sandbox.StopOptions{Blocking: true})
+```
 
-#### `sandbox.Extend(ctx, client, durationMs) error`
+### `sandbox.Start(ctx, client) error`
 
-Extends the sandbox TTL by `durationMs` milliseconds. Pass `0` to use the server default (12 hours).
+Use `sandbox.Start()` to resume a stopped sandbox.
+
+**Returns:** `error`
+
+```go
+err := sb.Start(ctx, client)
+```
+
+### `sandbox.Restart(ctx, client) error`
+
+Use `sandbox.Restart()` to stop and restart the sandbox.
+
+**Returns:** `error`
+
+```go
+err := sb.Restart(ctx, client)
+```
+
+### `sandbox.Extend(ctx, client, durationMs) error`
+
+Use `sandbox.Extend()` to extend the sandbox TTL by `durationMs` milliseconds. Pass `0` to use the server default (12 hours).
+
+**Returns:** `error`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `durationMs` | `int64` | No | Duration to add in milliseconds. Pass `0` for the server default (12 hours). |
 
 ```go
 // Extend by 30 minutes
-sb.Extend(ctx, client, 30*60*1000)
+err := sb.Extend(ctx, client, 30*60*1000)
 ```
 
-#### `sandbox.ExtendTimeout(ctx, client, durationMs) error`
+### `sandbox.ExtendTimeout(ctx, client, durationMs) error`
 
-Extends the TTL and immediately refreshes `sb.Info`.
+Use `sandbox.ExtendTimeout()` to extend the TTL and immediately refresh `sb.Info` in one call.
 
-#### `sandbox.Status() string`
+**Returns:** `error`
 
-Returns the cached status string (`"active"`, `"stopped"`, etc.). Call `Refresh` first for a live value.
+```go
+err := sb.ExtendTimeout(ctx, client, 60*60*1000) // +1 hour
+```
 
-#### `sandbox.ExpireAt() string`
+### `sandbox.Update(ctx, client, opts) error`
 
-Returns the cached expiry timestamp in RFC 3339 format.
+Use `sandbox.Update()` to change the sandbox spec, image, or payloads. Changing payloads triggers a sandbox restart.
 
-#### `sandbox.Timeout() int64`
+**Returns:** `error`
 
-Returns the remaining sandbox lifetime in milliseconds based on the cached `ExpireAt`. Returns `0` if the sandbox has already expired. Call `Refresh` first for an accurate value.
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `opts.Spec` | `*Spec` | No | New resource spec. |
+| `opts.Image` | `string` | No | New container image tag. |
+| `opts.Payloads` | `[]Payload` | No | Replaces all stored payloads and triggers a restart. |
 
-#### `sandbox.Update(ctx, client, opts) error`
+```go
+err := sb.Update(ctx, client, sandbox.UpdateOptions{
+    Spec: &sandbox.Spec{CPU: "4", Memory: "8Gi"},
+})
+```
 
-Updates the sandbox spec, image, or payloads. Changing payloads triggers a sandbox restart.
+### `sandbox.Configure(ctx, client, payloads...) error`
 
-| Parameter | Type | Description |
-|---|---|---|
-| `opts.Spec` | `*Spec` | New resource spec. |
-| `opts.Image` | `string` | New container image tag. |
-| `opts.Payloads` | `[]Payload` | Replaces all stored payloads and triggers a restart. |
+Call `sandbox.Configure()` to immediately apply the current configuration to the running pod. Optionally override the stored payloads for this apply only.
 
-#### `sandbox.Configure(ctx, client, payloads...) error`
+**Returns:** `error`
 
-Immediately applies the current configuration to the running pod. Optionally override the stored payloads for this apply only.
+```go
+err := sb.Configure(ctx, client)
+```
 
-#### `sandbox.Delete(ctx, client) error`
+### `sandbox.Delete(ctx, client) error`
 
-Permanently deletes the sandbox. This cannot be undone.
+Call `sandbox.Delete()` to permanently delete the sandbox. This cannot be undone.
 
-#### `sandbox.Close()`
+**Returns:** `error`
 
-Closes the WebSocket connection. Call this (or use `defer sb.Close()`) when you are done with the sandbox to free the connection.
+```go
+err := sb.Delete(ctx, client)
+```
+
+### `sandbox.Close()`
+
+Call `sandbox.Close()` to close the WebSocket connection. Use `defer sb.Close()` to ensure the connection is always freed.
+
+```go
+sb, err := client.Create(ctx, sandbox.CreateOptions{UserID: "user-123"})
+if err != nil {
+    log.Fatal(err)
+}
+defer sb.Close()
+```
 
 ---
 
