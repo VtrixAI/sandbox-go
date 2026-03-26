@@ -13,7 +13,7 @@ func main() {
 	client := sandbox.NewClient(sandbox.ClientOptions{
 		BaseURL:   "http://localhost:8080",
 		Token:     "your-token",
-		ServiceID: "seaclaw",
+		ProjectID: "seaclaw",
 	})
 
 	ctx := context.Background()

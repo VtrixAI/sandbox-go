@@ -27,7 +27,7 @@ func main() {
     client := sandbox.NewClient(sandbox.ClientOptions{
         BaseURL:   "http://your-hermes-host:8080",
         Token:     "your-token",
-        ServiceID: "your-service-id",
+        ProjectID: "your-project-id",
     })
 
     ctx := context.Background()
@@ -69,14 +69,14 @@ Creates a new client. The client is reusable and safe for concurrent use across 
 |---|---|---|---|
 | `BaseURL` | `string` | Yes | Hermes gateway URL (e.g. `http://host:8080`). |
 | `Token` | `string` | No | Bearer token for authentication. |
-| `ServiceID` | `string` | No | Value sent as `X-Service-ID` header. |
+| `ProjectID` | `string` | No | Value sent as `X-Project-ID` header. |
 | `HTTPClient` | `*http.Client` | No | Optional custom HTTP client for proxy or TLS configuration. |
 
 ```go
 client := sandbox.NewClient(sandbox.ClientOptions{
     BaseURL:   "http://your-hermes-host:8080",
     Token:     "your-token",
-    ServiceID: "your-service-id",
+    ProjectID: "your-project-id",
 })
 ```
 
@@ -104,20 +104,18 @@ sb, err := client.Create(ctx, sandbox.CreateOptions{
 })
 ```
 
-### `client.Attach(ctx, sandboxID, token, serviceID) (*Sandbox, error)`
+### `client.Attach(ctx, sandboxID) (*Sandbox, error)`
 
-Use `client.Attach()` to connect to an existing sandbox without creating a new one. Use this to resume a session after a restart or to connect from a different goroutine. Pass empty strings for `token` and `serviceID` to fall back to the client-level values.
+Use `client.Attach()` to connect to an existing sandbox without creating a new one. Use this to resume a session after a restart or to connect from a different goroutine. Auth uses the client-level token and project ID.
 
 **Returns:** `(*Sandbox, error)`
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `sandboxID` | `string` | Yes | ID of the sandbox to connect to. |
-| `token` | `string` | No | Override the client-level token. Pass `""` to use the default. |
-| `serviceID` | `string` | No | Override the client-level service ID. Pass `""` to use the default. |
 
 ```go
-sb, err := client.Attach(ctx, "sandbox-id-abc", "", "")
+sb, err := client.Attach(ctx, "sandbox-id-abc")
 ```
 
 ### `client.List(ctx, opts) (*ListResult, error)`
@@ -167,9 +165,19 @@ A `*Sandbox` gives you full control over an isolated environment. You receive on
 
 ### Methods
 
+#### `sandbox.CreatedAt() time.Time`
+
+`CreatedAt()` returns the sandbox creation time parsed from `sb.Info.CreatedAt`. Returns `time.Time{}` (zero value) if the field is empty or unparsable.
+
+**Returns:** `time.Time`
+
+```go
+fmt.Println(sb.CreatedAt().Format(time.RFC3339))
+```
+
 #### `sandbox.Status() string`
 
-The `Status()` method returns the cached lifecycle state of the sandbox. Call `sandbox.Refresh(ctx, client)` first if you need a live value.
+The `Status()` method returns the cached lifecycle state of the sandbox. Call `sandbox.Refresh(ctx)` first if you need a live value.
 
 **Returns:** `string` — `"active"`, `"stopped"`, `"destroying"`, etc.
 
@@ -179,7 +187,7 @@ fmt.Println(sb.Status())
 
 #### `sandbox.ExpireAt() string`
 
-`ExpireAt()` returns the cached expiry timestamp. Call `sandbox.Refresh(ctx, client)` first for an accurate value.
+`ExpireAt()` returns the cached expiry timestamp. Call `sandbox.Refresh(ctx)` first for an accurate value.
 
 **Returns:** `string` — RFC 3339 timestamp.
 
@@ -195,7 +203,7 @@ fmt.Println(sb.ExpireAt())
 
 ```go
 if sb.Timeout() < 60_000 {
-    sb.ExtendTimeout(ctx, client, 30*60*1000)
+    sb.ExtendTimeout(ctx, 1) // extend by 1 hour
 }
 ```
 
@@ -645,7 +653,7 @@ Use `sandbox.UploadFile()` to upload a file from the local filesystem into the s
 | `opts.MkdirRecursive` | `bool` | No | Create parent directories on the sandbox side if they do not exist. |
 
 ```go
-err := sb.UploadFile(ctx, "/local/model.bin", "/app/model.bin", sandbox.UploadOptions{MkdirRecursive: true})
+err := sb.UploadFile(ctx, "/local/model.bin", "/app/model.bin", &sandbox.FileOptions{MkdirRecursive: true})
 ```
 
 ### `sandbox.DownloadFile(ctx, sandboxPath, localPath, opts) (string, error)`
@@ -669,7 +677,7 @@ if dst != "" {
 
 ### `sandbox.DownloadFiles(ctx, entries, opts) (map[string]string, error)`
 
-Use `sandbox.DownloadFiles()` to download multiple files in parallel. Returns a map of sandbox path → local path for each file that was successfully downloaded.
+Use `sandbox.DownloadFiles()` to download multiple files in parallel (up to 8 concurrent). Returns a map of sandbox path → local path for each file that was successfully downloaded.
 
 **Returns:** `(map[string]string, error)`
 
@@ -699,20 +707,20 @@ fmt.Printf("App running at %s\n", url)
 
 ## Lifecycle
 
-### `sandbox.Refresh(ctx, client) error`
+### `sandbox.Refresh(ctx) error`
 
 Call `sandbox.Refresh()` to re-fetch sandbox metadata from the server and update `sb.Info`. Call this before reading `Status()` or `ExpireAt()` if you need current values.
 
 **Returns:** `error`
 
 ```go
-if err := sb.Refresh(ctx, client); err != nil {
+if err := sb.Refresh(ctx); err != nil {
     log.Fatal(err)
 }
 fmt.Println(sb.Status())
 ```
 
-### `sandbox.Stop(ctx, client, opts) error`
+### `sandbox.Stop(ctx, opts) error`
 
 Call `sandbox.Stop()` to pause the sandbox without deleting it. Set `opts.Blocking` to wait until the sandbox reaches `"stopped"` or `"failed"` status before returning.
 
@@ -725,55 +733,54 @@ Call `sandbox.Stop()` to pause the sandbox without deleting it. Set `opts.Blocki
 | `opts.Timeout` | `time.Duration` | No | Maximum time to wait. Defaults to `5 minutes`. |
 
 ```go
-err := sb.Stop(ctx, client, sandbox.StopOptions{Blocking: true})
+err := sb.Stop(ctx, &sandbox.StopOptions{Blocking: true})
 ```
 
-### `sandbox.Start(ctx, client) error`
+### `sandbox.Start(ctx) error`
 
 Use `sandbox.Start()` to resume a stopped sandbox.
 
 **Returns:** `error`
 
 ```go
-err := sb.Start(ctx, client)
+err := sb.Start(ctx)
 ```
 
-### `sandbox.Restart(ctx, client) error`
+### `sandbox.Restart(ctx) error`
 
 Use `sandbox.Restart()` to stop and restart the sandbox.
 
 **Returns:** `error`
 
 ```go
-err := sb.Restart(ctx, client)
+err := sb.Restart(ctx)
 ```
 
-### `sandbox.Extend(ctx, client, durationMs) error`
+### `sandbox.Extend(ctx, hours) error`
 
-Use `sandbox.Extend()` to extend the sandbox TTL by `durationMs` milliseconds. Pass `0` to use the server default (12 hours).
+Use `sandbox.Extend()` to extend the sandbox TTL by `hours`. Pass `0` to use the server default (12 hours).
 
 **Returns:** `error`
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `durationMs` | `int64` | No | Duration to add in milliseconds. Pass `0` for the server default (12 hours). |
+| `hours` | `int` | No | Number of hours to add. Pass `0` for the server default (12 hours). |
 
 ```go
-// Extend by 30 minutes
-err := sb.Extend(ctx, client, 30*60*1000)
+err := sb.Extend(ctx, 2) // extend by 2 hours
 ```
 
-### `sandbox.ExtendTimeout(ctx, client, durationMs) error`
+### `sandbox.ExtendTimeout(ctx, hours) error`
 
 Use `sandbox.ExtendTimeout()` to extend the TTL and immediately refresh `sb.Info` in one call.
 
 **Returns:** `error`
 
 ```go
-err := sb.ExtendTimeout(ctx, client, 60*60*1000) // +1 hour
+err := sb.ExtendTimeout(ctx, 1) // +1 hour, then refresh
 ```
 
-### `sandbox.Update(ctx, client, opts) error`
+### `sandbox.Update(ctx, opts) error`
 
 Use `sandbox.Update()` to change the sandbox spec, image, or payloads. Changing payloads triggers a sandbox restart.
 
@@ -786,29 +793,29 @@ Use `sandbox.Update()` to change the sandbox spec, image, or payloads. Changing 
 | `opts.Payloads` | `[]Payload` | No | Replaces all stored payloads and triggers a restart. |
 
 ```go
-err := sb.Update(ctx, client, sandbox.UpdateOptions{
+err := sb.Update(ctx, sandbox.UpdateOptions{
     Spec: &sandbox.Spec{CPU: "4", Memory: "8Gi"},
 })
 ```
 
-### `sandbox.Configure(ctx, client, payloads...) error`
+### `sandbox.Configure(ctx, payloads...) error`
 
 Call `sandbox.Configure()` to immediately apply the current configuration to the running pod. Optionally override the stored payloads for this apply only.
 
 **Returns:** `error`
 
 ```go
-err := sb.Configure(ctx, client)
+err := sb.Configure(ctx)
 ```
 
-### `sandbox.Delete(ctx, client) error`
+### `sandbox.Delete(ctx) error`
 
 Call `sandbox.Delete()` to permanently delete the sandbox. This cannot be undone.
 
 **Returns:** `error`
 
 ```go
-err := sb.Delete(ctx, client)
+err := sb.Delete(ctx)
 ```
 
 ### `sandbox.Close()`

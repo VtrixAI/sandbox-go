@@ -14,7 +14,7 @@ func main() {
 	client := sandbox.NewClient(sandbox.ClientOptions{
 		BaseURL:   "http://localhost:8080",
 		Token:     "your-token",
-		ServiceID: "seaclaw",
+		ProjectID: "seaclaw",
 	})
 
 	ctx := context.Background()
@@ -52,14 +52,14 @@ func main() {
 	}
 	fmt.Printf("Get: status=%s, ip=%s\n", info.Status, info.IP)
 
-	// ── 延期 (12h = 43_200_000 ms) ────────────────────────
-	if err := sb.Extend(ctx, client, 43_200_000); err != nil {
+	// ── 延期 12h ──────────────────────────────────────────
+	if err := sb.Extend(ctx, 12); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("Extended TTL by 12h")
 
 	// ── 更新配置（不重启 WS，只改 spec/env）────────────
-	if err := sb.Update(ctx, client, sandbox.UpdateOptions{
+	if err := sb.Update(ctx, sandbox.UpdateOptions{
 		Payloads: []sandbox.Payload{
 			{API: "/api/v1/env", Body: map[string]string{"LOG_LEVEL": "debug"}},
 		},
@@ -69,38 +69,38 @@ func main() {
 	fmt.Println("Updated env")
 
 	// ── 立即应用配置 ──────────────────────────────────────
-	if err := sb.Configure(ctx, client); err != nil {
+	if err := sb.Configure(ctx); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("Configured")
 
 	// ── 刷新本地 Info ─────────────────────────────────────
-	if err := sb.Refresh(ctx, client); err != nil {
+	if err := sb.Refresh(ctx); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("Refreshed: status=%s\n", sb.Info.Status)
 
 	// ── 停止 / 等待 / 启动 ───────────────────────────────
-	if err := sb.Stop(ctx, client, nil); err != nil {
+	if err := sb.Stop(ctx, nil); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("Stopped")
 	time.Sleep(2 * time.Second)
 
-	if err := sb.Start(ctx, client); err != nil {
+	if err := sb.Start(ctx); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("Started")
 
 	// ── 重启 ─────────────────────────────────────────────
-	if err := sb.Restart(ctx, client); err != nil {
+	if err := sb.Restart(ctx); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("Restarted")
 
 	// ── 删除 ─────────────────────────────────────────────
 	sb.Close()
-	if err := sb.Delete(ctx, client); err != nil {
+	if err := sb.Delete(ctx); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("Deleted %s\n", sb.Info.ID)

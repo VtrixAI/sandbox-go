@@ -21,13 +21,13 @@ func main() {
 	client := sandbox.NewClient(sandbox.ClientOptions{
 		BaseURL:   "http://localhost:8080",
 		Token:     "your-token",
-		ServiceID: "seaclaw",
+		ProjectID: "seaclaw",
 	})
 
 	ctx := context.Background()
 
 	fmt.Printf("Attaching to existing sandbox: %s\n", sandboxID)
-	sb, err := client.Attach(ctx, sandboxID, "", "")
+	sb, err := client.Attach(ctx, sandboxID)
 	if err != nil {
 		log.Fatal(err)
 	}
