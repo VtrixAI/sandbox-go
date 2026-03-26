@@ -96,7 +96,7 @@ func (s *Sandbox) MkDir(ctx context.Context, path string) error {
 // DownloadFile downloads a file from the sandbox to a local path.
 // If opts.MkdirRecursive is true, parent directories are created automatically.
 // Returns the absolute local path of the saved file, or "" if the file does not exist.
-func (s *Sandbox) DownloadFile(ctx context.Context, sandboxPath, localPath string, opts *DownloadOptions) (string, error) {
+func (s *Sandbox) DownloadFile(ctx context.Context, sandboxPath, localPath string, opts *FileOptions) (string, error) {
 	data, err := s.ReadToBuffer(ctx, sandboxPath)
 	if err != nil {
 		return "", fmt.Errorf("download %q: %w", sandboxPath, err)
@@ -126,17 +126,22 @@ func (s *Sandbox) DownloadFile(ctx context.Context, sandboxPath, localPath strin
 // DownloadFiles downloads multiple files concurrently from the sandbox to local paths.
 // Returns a map of sandboxPath → absolute local path for successful downloads.
 // If any download fails, returns the error immediately (partial results may exist on disk).
-func (s *Sandbox) DownloadFiles(ctx context.Context, files []DownloadEntry, opts *DownloadOptions) (map[string]string, error) {
+func (s *Sandbox) DownloadFiles(ctx context.Context, files []DownloadEntry, opts *FileOptions) (map[string]string, error) {
+	const maxConcurrent = 8
+
 	type result struct {
 		sandboxPath string
 		localPath   string
 		err         error
 	}
 
+	sem := make(chan struct{}, maxConcurrent)
 	results := make(chan result, len(files))
 	for _, f := range files {
 		f := f // capture loop var
 		go func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			localPath, err := s.DownloadFile(ctx, f.SandboxPath, f.LocalPath, opts)
 			results <- result{sandboxPath: f.SandboxPath, localPath: localPath, err: err}
 		}()
@@ -165,7 +170,7 @@ func (s *Sandbox) Domain(port int) string {
 // UploadFile reads a local file and writes it into the sandbox at sandboxPath.
 // If opts.MkdirRecursive is true, parent directories are created in the sandbox first.
 // If opts.Mode is non-zero, that Unix permission is set on the remote file.
-func (s *Sandbox) UploadFile(ctx context.Context, localPath, sandboxPath string, opts *DownloadOptions) error {
+func (s *Sandbox) UploadFile(ctx context.Context, localPath, sandboxPath string, opts *FileOptions) error {
 	data, err := os.ReadFile(localPath)
 	if err != nil {
 		return fmt.Errorf("read local %q: %w", localPath, err)

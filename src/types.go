@@ -42,7 +42,7 @@ type CreateOptions struct {
 	Payloads  []Payload         `json:"payloads,omitempty"`
 	TTLHours  int               `json:"ttl_hours,omitempty"`
 	Token     string            `json:"-"` // Bearer token
-	ServiceID string            `json:"-"` // X-Service-ID header
+	ProjectID string            `json:"-"` // X-Project-ID header
 	Env       map[string]string `json:"-"` // default env inherited by all commands
 }
 
@@ -67,9 +67,9 @@ type RunOptions struct {
 	Stderr     io.Writer
 }
 
-// DownloadOptions configures a DownloadFile call.
-type DownloadOptions struct {
-	// MkdirRecursive creates parent directories on the local filesystem if needed.
+// FileOptions configures file transfer operations (DownloadFile / UploadFile).
+type FileOptions struct {
+	// MkdirRecursive creates parent directories if needed (local for downloads, sandbox for uploads).
 	MkdirRecursive bool
 }
 

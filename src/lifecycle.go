@@ -68,8 +68,8 @@ func (c *Client) Delete(ctx context.Context, sandboxID string) error {
 // ── Sandbox lifecycle methods ─────────────────────────────
 
 // Refresh re-fetches this sandbox's metadata from Atlas and updates sb.Info.
-func (sb *Sandbox) Refresh(ctx context.Context, c *Client) error {
-	info, err := c.getSandbox(ctx, sb.Info.ID, CreateOptions{})
+func (sb *Sandbox) Refresh(ctx context.Context) error {
+	info, err := sb.client.getSandbox(ctx, sb.Info.ID, CreateOptions{})
 	if err != nil {
 		return err
 	}
@@ -79,8 +79,8 @@ func (sb *Sandbox) Refresh(ctx context.Context, c *Client) error {
 
 // Stop pauses the sandbox without deleting it.
 // If opts.Blocking is true, polls until status is "stopped" or "failed".
-func (sb *Sandbox) Stop(ctx context.Context, c *Client, opts *StopOptions) error {
-	if err := c.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/stop", nil); err != nil {
+func (sb *Sandbox) Stop(ctx context.Context, opts *StopOptions) error {
+	if err := sb.client.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/stop", nil); err != nil {
 		return err
 	}
 	if opts == nil || !opts.Blocking {
@@ -99,12 +99,15 @@ func (sb *Sandbox) Stop(ctx context.Context, c *Client, opts *StopOptions) error
 	ctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("stop timeout: sandbox %s did not reach stopped state", sb.Info.ID)
-		case <-time.After(interval):
-			info, err := c.Get(ctx, sb.Info.ID)
+		case <-ticker.C:
+			info, err := sb.client.Get(ctx, sb.Info.ID)
 			if err != nil {
 				return err
 			}
@@ -117,30 +120,29 @@ func (sb *Sandbox) Stop(ctx context.Context, c *Client, opts *StopOptions) error
 }
 
 // Start resumes a stopped sandbox.
-func (sb *Sandbox) Start(ctx context.Context, c *Client) error {
-	return c.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/start", nil)
+func (sb *Sandbox) Start(ctx context.Context) error {
+	return sb.client.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/start", nil)
 }
 
 // Restart restarts the sandbox.
-func (sb *Sandbox) Restart(ctx context.Context, c *Client) error {
-	return c.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/restart", nil)
+func (sb *Sandbox) Restart(ctx context.Context) error {
+	return sb.client.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/restart", nil)
 }
 
-// Extend extends the sandbox TTL by durationMs milliseconds.
+// Extend extends the sandbox TTL by the given number of hours.
 // Pass 0 to use the server default (12h).
-func (sb *Sandbox) Extend(ctx context.Context, c *Client, durationMs int64) error {
-	hours := int(durationMs / 3_600_000)
-	return c.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/extend",
+func (sb *Sandbox) Extend(ctx context.Context, hours int) error {
+	return sb.client.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/extend",
 		map[string]int{"hours": hours})
 }
 
-// ExtendTimeout extends the sandbox TTL by durationMs milliseconds and refreshes Info.
+// ExtendTimeout extends the sandbox TTL by the given number of hours and refreshes Info.
 // Pass 0 to use the server default (12h).
-func (sb *Sandbox) ExtendTimeout(ctx context.Context, c *Client, durationMs int64) error {
-	if err := sb.Extend(ctx, c, durationMs); err != nil {
+func (sb *Sandbox) ExtendTimeout(ctx context.Context, hours int) error {
+	if err := sb.Extend(ctx, hours); err != nil {
 		return err
 	}
-	return sb.Refresh(ctx, c)
+	return sb.Refresh(ctx)
 }
 
 // Status returns the current status from the cached Info (call Refresh first for live data).
@@ -180,32 +182,32 @@ func (sb *Sandbox) Timeout() int64 {
 	return ms
 }
 
-// Update patches the sandbox spec/image/env. At least one field in opts must be set.
-func (sb *Sandbox) Update(ctx context.Context, c *Client, opts UpdateOptions) error {
+// Update patches the sandbox spec/image/payloads. At least one field in opts must be set.
+func (sb *Sandbox) Update(ctx context.Context, opts UpdateOptions) error {
 	body, _ := json.Marshal(opts)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPatch,
-		c.baseURL+"/api/v1/sandbox/"+sb.Info.ID, bytes.NewReader(body))
+		sb.client.baseURL+"/api/v1/sandbox/"+sb.Info.ID, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	c.applyAuth(req, CreateOptions{})
-	return c.doSimple(req)
+	sb.client.applyAuth(req, CreateOptions{})
+	return sb.client.doSimple(req)
 }
 
 // Configure immediately applies the current sandbox configuration to the pod.
 // Optionally pass payloads to override the stored payloads for this apply.
-func (sb *Sandbox) Configure(ctx context.Context, c *Client, payloads ...Payload) error {
+func (sb *Sandbox) Configure(ctx context.Context, payloads ...Payload) error {
 	var body any
 	if len(payloads) > 0 {
 		body = map[string]any{"payloads": payloads}
 	}
-	return c.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/configure", body)
+	return sb.client.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/configure", body)
 }
 
 // Delete permanently deletes this sandbox.
-func (sb *Sandbox) Delete(ctx context.Context, c *Client) error {
-	return c.Delete(ctx, sb.Info.ID)
+func (sb *Sandbox) Delete(ctx context.Context) error {
+	return sb.client.Delete(ctx, sb.Info.ID)
 }
 
 // ── Shared HTTP helpers ───────────────────────────────────

@@ -15,6 +15,7 @@ import (
 type Sandbox struct {
 	Info Info
 
+	client     *Client
 	conn       *websocket.Conn
 	idGen      atomic.Int64
 	mu         sync.Mutex // guards pending
@@ -115,15 +116,24 @@ func (s *Sandbox) dispatchNotification(msg *rpcResponse) {
 	}
 
 	if p.stream != nil {
+		var ev ExecEvent
 		switch msg.Method {
 		case "exec.start":
-			p.stream <- ExecEvent{Type: "start"}
+			ev = ExecEvent{Type: "start"}
 		case "exec.stdout":
-			p.stream <- ExecEvent{Type: "stdout", Data: np.Data}
+			ev = ExecEvent{Type: "stdout", Data: np.Data}
 		case "exec.stderr":
-			p.stream <- ExecEvent{Type: "stderr", Data: np.Data}
+			ev = ExecEvent{Type: "stderr", Data: np.Data}
 		case "exec.done":
-			p.stream <- ExecEvent{Type: "done", Data: np.Output}
+			ev = ExecEvent{Type: "done", Data: np.Output}
+		default:
+			return
+		}
+		select {
+		case p.stream <- ev:
+		default:
+			// consumer is slow; block briefly rather than silently drop
+			go func() { p.stream <- ev }()
 		}
 		return
 	}

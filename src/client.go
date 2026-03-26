@@ -23,7 +23,7 @@ const (
 type Client struct {
 	baseURL   string
 	token     string
-	serviceID string
+	projectID string
 	http      *http.Client
 }
 
@@ -33,8 +33,8 @@ type ClientOptions struct {
 	BaseURL string
 	// Token is the Bearer token forwarded to Atlas.
 	Token string
-	// ServiceID is the X-Service-ID header value (e.g. "seaclaw").
-	ServiceID string
+	// ProjectID is the X-Project-ID header value, used to identify the calling project.
+	ProjectID string
 	// HTTPClient overrides the default HTTP client.
 	HTTPClient *http.Client
 }
@@ -48,7 +48,7 @@ func NewClient(opts ClientOptions) *Client {
 	return &Client{
 		baseURL:   strings.TrimRight(opts.BaseURL, "/"),
 		token:     opts.Token,
-		serviceID: opts.ServiceID,
+		projectID: opts.ProjectID,
 		http:      hc,
 	}
 }
@@ -80,14 +80,13 @@ func (c *Client) Create(ctx context.Context, opts CreateOptions) (*Sandbox, erro
 }
 
 // Attach fetches an existing sandbox and opens a WebSocket connection to it.
-// Use this when you already have a sandbox ID.
-func (c *Client) Attach(ctx context.Context, sandboxID string, token, serviceID string) (*Sandbox, error) {
-	opts := CreateOptions{Token: token, ServiceID: serviceID}
-	info, err := c.getSandbox(ctx, sandboxID, opts)
+// Use this when you already have a sandbox ID. Auth uses the client-level token.
+func (c *Client) Attach(ctx context.Context, sandboxID string) (*Sandbox, error) {
+	info, err := c.getSandbox(ctx, sandboxID, CreateOptions{})
 	if err != nil {
 		return nil, err
 	}
-	return c.connect(ctx, info, opts)
+	return c.connect(ctx, info, CreateOptions{})
 }
 
 // ── HTTP helpers ──────────────────────────────────────────
@@ -213,12 +212,12 @@ func (c *Client) connect(ctx context.Context, info Info, opts CreateOptions) (*S
 		headers.Set("Authorization", "Bearer "+token)
 	}
 
-	sid := opts.ServiceID
+	sid := opts.ProjectID
 	if sid == "" {
-		sid = c.serviceID
+		sid = c.projectID
 	}
 	if sid != "" {
-		headers.Set("X-Service-ID", sid)
+		headers.Set("X-Project-ID", sid)
 	}
 
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
@@ -229,6 +228,7 @@ func (c *Client) connect(ctx context.Context, info Info, opts CreateOptions) (*S
 
 	sb := &Sandbox{
 		Info:       info,
+		client:     c,
 		conn:       conn,
 		pending:    make(map[int64]*pendingCall),
 		closed:     make(chan struct{}),
@@ -238,7 +238,7 @@ func (c *Client) connect(ctx context.Context, info Info, opts CreateOptions) (*S
 	return sb, nil
 }
 
-// applyAuth sets Authorization and X-Service-ID headers from opts (falling back
+// applyAuth sets Authorization and X-Project-ID headers from opts (falling back
 // to Client-level defaults).
 func (c *Client) applyAuth(req *http.Request, opts CreateOptions) {
 	token := opts.Token
@@ -249,11 +249,11 @@ func (c *Client) applyAuth(req *http.Request, opts CreateOptions) {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	sid := opts.ServiceID
+	sid := opts.ProjectID
 	if sid == "" {
-		sid = c.serviceID
+		sid = c.projectID
 	}
 	if sid != "" {
-		req.Header.Set("X-Service-ID", sid)
+		req.Header.Set("X-Project-ID", sid)
 	}
 }
