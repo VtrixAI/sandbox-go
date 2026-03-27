@@ -2,3 +2,5 @@
 *.out
 vendor/
 .DS_Store
+hermestest-lifecycle
+hermestest-sandbox
