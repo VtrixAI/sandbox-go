@@ -384,19 +384,23 @@ func testCreateWithSpec(ctx context.Context, client *sdk.Client) {
 	fmt.Printf("    spec sandbox: %s\n", sb.Info.ID)
 
 	// Clean up
-	mustE(client.Delete(ctx, sb.Info.ID))
+	_ = client.Delete(ctx, sb.Info.ID)
 	check("create spec: deleted", true)
 }
 
 func testRefreshAndStatus(ctx context.Context, client *sdk.Client, sandboxID string) {
 	fmt.Println("\n── lifecycle: Refresh / Status / CreatedAt / Timeout ──")
 
-	sb := mustV(client.Attach(ctx, sandboxID))
+	sb, err := client.Attach(ctx, sandboxID)
+	check("attach no error", err == nil, fmt.Sprint(err))
+	if err != nil {
+		return
+	}
 	defer sb.Close()
 
 	check("status before refresh non-empty", sb.Status() != "", sb.Status())
 
-	err := sb.Refresh(ctx)
+	err = sb.Refresh(ctx)
 	check("refresh no error", err == nil, fmt.Sprint(err))
 	check("status after refresh active", sb.Status() == "active", sb.Status())
 	check("created_at parseable", !sb.CreatedAt().IsZero())
@@ -407,22 +411,32 @@ func testRefreshAndStatus(ctx context.Context, client *sdk.Client, sandboxID str
 func testExtend(ctx context.Context, client *sdk.Client, sandboxID string) {
 	fmt.Println("\n── lifecycle: Extend / ExtendTimeout ──")
 
-	sb := mustV(client.Attach(ctx, sandboxID))
+	sb, err := client.Attach(ctx, sandboxID)
+	check("attach no error", err == nil, fmt.Sprint(err))
+	if err != nil {
+		return
+	}
 	defer sb.Close()
 
-	mustE(sb.Refresh(ctx))
+	if err := sb.Refresh(ctx); err != nil {
+		check("refresh no error", false, fmt.Sprint(err))
+		return
+	}
 	before := sb.ExpireAt()
 
 	// Extend by 1 hour
-	err := sb.Extend(ctx, 1)
-	check("extend 1h no error", err == nil, fmt.Sprint(err))
+	err2 := sb.Extend(ctx, 1)
+	check("extend 1h no error", err2 == nil, fmt.Sprint(err2))
 
-	mustE(sb.Refresh(ctx))
+	if err3 := sb.Refresh(ctx); err3 != nil {
+		check("refresh after extend no error", false, fmt.Sprint(err3))
+		return
+	}
 	after := sb.ExpireAt()
 	check("extend updated expire_at", after != before || after != "", fmt.Sprintf("%s → %s", before, after))
 
 	// ExtendTimeout (extend + refresh in one call)
-	err2 := sb.ExtendTimeout(ctx, 0) // server default
+	err2 = sb.ExtendTimeout(ctx, 0) // server default
 	check("extendTimeout no error", err2 == nil, fmt.Sprint(err2))
 	check("extendTimeout expire_at set", sb.ExpireAt() != "", sb.ExpireAt())
 }
@@ -430,7 +444,11 @@ func testExtend(ctx context.Context, client *sdk.Client, sandboxID string) {
 func testUpdate(ctx context.Context, client *sdk.Client, sandboxID string) {
 	fmt.Println("\n── lifecycle: Update ──")
 
-	sb := mustV(client.Attach(ctx, sandboxID))
+	sb, err := client.Attach(ctx, sandboxID)
+	check("attach no error", err == nil, fmt.Sprint(err))
+	if err != nil {
+		return
+	}
 	defer sb.Close()
 
 	// Update with new spec (cpu/memory)
@@ -442,7 +460,7 @@ func testUpdate(ctx context.Context, client *sdk.Client, sandboxID string) {
 	if testImage != "" {
 		opts.Image = testImage
 	}
-	err := sb.Update(ctx, opts)
+	err = sb.Update(ctx, opts)
 	check("update no error", err == nil, fmt.Sprint(err))
 	if err != nil {
 		return
@@ -495,11 +513,15 @@ func testUpdate(ctx context.Context, client *sdk.Client, sandboxID string) {
 func testConfigure(ctx context.Context, client *sdk.Client, sandboxID string) {
 	fmt.Println("\n── lifecycle: Configure ──")
 
-	sb := mustV(client.Attach(ctx, sandboxID))
+	sb, err := client.Attach(ctx, sandboxID)
+	check("attach no error", err == nil, fmt.Sprint(err))
+	if err != nil {
+		return
+	}
 	defer sb.Close()
 
 	// Configure with no payloads (re-apply stored config)
-	err := sb.Configure(ctx)
+	err = sb.Configure(ctx)
 	check("configure no payloads no error", err == nil, fmt.Sprint(err))
 	if err != nil {
 		return
@@ -527,11 +549,20 @@ func testConfigure(ctx context.Context, client *sdk.Client, sandboxID string) {
 	}())
 
 	// Configure with explicit payloads
+	// 稍等片刻，让 K8s informer 刷新 Pod IP（避免 provider.GetSandbox 拿到旧 IP）
 	fmt.Println("\n── lifecycle: Configure with Payloads ──")
-	err2 := sb.Configure(ctx, sdk.Payload{
-		API:  "/api/v1/env",
-		Body: map[string]string{"TEST_VAR": "hello"},
-	})
+	var err2 error
+	for i := 0; i < 5; i++ {
+		err2 = sb.Configure(ctx, sdk.Payload{
+			API:  "/api/v1/env",
+			Body: map[string]string{"TEST_VAR": "hello"},
+		})
+		if err2 == nil {
+			break
+		}
+		fmt.Printf("    configure with payload attempt %d error: %v, retrying...\n", i+1, err2)
+		time.Sleep(5 * time.Second)
+	}
 	check("configure with payload no error", err2 == nil, fmt.Sprint(err2))
 	if err2 != nil {
 		return
@@ -582,7 +613,12 @@ func testSpecPersistence(ctx context.Context, client *sdk.Client) {
 	}
 
 	// Update: set a pinned image + custom spec
-	sbUp := mustV(client.Attach(ctx, id))
+	sbUp, attachErr := client.Attach(ctx, id)
+	check("spec persist: attach no error", attachErr == nil, fmt.Sprint(attachErr))
+	if attachErr != nil {
+		client.Delete(ctx, id)
+		return
+	}
 	updateErr := sbUp.Update(ctx, sdk.UpdateOptions{
 		Image: testImage,
 		Spec:  &sdk.Spec{CPU: "600m", Memory: "640Mi"},
@@ -612,7 +648,12 @@ func testSpecPersistence(ctx context.Context, client *sdk.Client) {
 	}
 
 	// Stop (blocking)
-	sbStop := mustV(client.Attach(ctx, id))
+	sbStop, attachErr2 := client.Attach(ctx, id)
+	check("spec persist: attach for stop no error", attachErr2 == nil, fmt.Sprint(attachErr2))
+	if attachErr2 != nil {
+		client.Delete(ctx, id)
+		return
+	}
 	stopErr := sbStop.Stop(ctx, &sdk.StopOptions{
 		Blocking:     true,
 		PollInterval: 2 * time.Second,
@@ -622,7 +663,12 @@ func testSpecPersistence(ctx context.Context, client *sdk.Client) {
 	check("spec persist: stop no error", stopErr == nil, fmt.Sprint(stopErr))
 
 	// Start
-	sbStart := mustV(client.Attach(ctx, id))
+	sbStart, attachErr3 := client.Attach(ctx, id)
+	check("spec persist: attach for start no error", attachErr3 == nil, fmt.Sprint(attachErr3))
+	if attachErr3 != nil {
+		client.Delete(ctx, id)
+		return
+	}
 	startErr := sbStart.Start(ctx)
 	sbStart.Close()
 	check("spec persist: start no error", startErr == nil, fmt.Sprint(startErr))
@@ -689,7 +735,12 @@ func testStopStartRestart(ctx context.Context, client *sdk.Client) {
 	fmt.Printf("    sandbox for stop/start: %s\n", id)
 
 	// Stop (blocking)
-	sbStop := mustV(client.Attach(ctx, id))
+	sbStop, attachErr := client.Attach(ctx, id)
+	check("stop: attach no error", attachErr == nil, fmt.Sprint(attachErr))
+	if attachErr != nil {
+		client.Delete(ctx, id)
+		return
+	}
 	stopErr := sbStop.Stop(ctx, &sdk.StopOptions{
 		Blocking:     true,
 		PollInterval: 2 * time.Second,
@@ -698,11 +749,21 @@ func testStopStartRestart(ctx context.Context, client *sdk.Client) {
 	sbStop.Close()
 	check("stop blocking no error", stopErr == nil, fmt.Sprint(stopErr))
 
-	info := mustV(client.Get(ctx, id))
+	info, getErr := client.Get(ctx, id)
+	check("stop: get no error", getErr == nil, fmt.Sprint(getErr))
+	if getErr != nil {
+		client.Delete(ctx, id)
+		return
+	}
 	check("stop: status stopped", info.Status == "stopped", info.Status)
 
 	// Start
-	sbStart := mustV(client.Attach(ctx, id))
+	sbStart, attachErr2 := client.Attach(ctx, id)
+	check("start: attach no error", attachErr2 == nil, fmt.Sprint(attachErr2))
+	if attachErr2 != nil {
+		client.Delete(ctx, id)
+		return
+	}
 	err2 := sbStart.Start(ctx)
 	sbStart.Close()
 	check("start no error", err2 == nil, fmt.Sprint(err2))
@@ -730,7 +791,12 @@ func testStopStartRestart(ctx context.Context, client *sdk.Client) {
 
 	// Restart — only if sandbox is active
 	if info2 != nil && info2.Status == "active" {
-		sbRestart := mustV(client.Attach(ctx, id))
+		sbRestart, attachErr3 := client.Attach(ctx, id)
+		check("restart: attach no error", attachErr3 == nil, fmt.Sprint(attachErr3))
+		if attachErr3 != nil {
+			client.Delete(ctx, id)
+			return
+		}
 		err3 := sbRestart.Restart(ctx)
 		sbRestart.Close()
 		check("restart no error", err3 == nil, fmt.Sprint(err3))

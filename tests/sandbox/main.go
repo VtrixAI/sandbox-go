@@ -15,7 +15,7 @@
 // Environment variables:
 //
 //	HERMES_URL      Gateway base URL  (required)
-//	HERMES_TOKEN    Bearer token      (required)
+//	HERMES_TOKEN    Bearer token（必填，与网关 auth.token 一致；勿写入源码）
 //	HERMES_PROJECT  Project ID        (required)
 //	SANDBOX_ID      Existing active sandbox ID to test against (required)
 package main
@@ -34,7 +34,7 @@ import (
 
 var (
 	baseURL   = envOr("HERMES_URL", "http://localhost:8080")
-	token     = envOr("HERMES_TOKEN", "test")
+	token     string // set in main from HERMES_TOKEN
 	project   = envOr("HERMES_PROJECT", "local")
 	sandboxID = mustEnv("SANDBOX_ID")
 )
@@ -651,6 +651,7 @@ func run(ctx context.Context, name string, fn func(context.Context, *sdk.Sandbox
 }
 
 func main() {
+	token = mustEnv("HERMES_TOKEN")
 	ctx := context.Background()
 
 	fmt.Printf("Target: %s  Project: %s  Sandbox: %s\n", baseURL, project, sandboxID)

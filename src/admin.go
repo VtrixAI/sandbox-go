@@ -56,8 +56,9 @@ type RollingStatus struct {
 
 // RollingStartOptions configures a rolling update.
 type RollingStartOptions struct {
-	// Image is the target image to roll out (required).
-	Image string `json:"image"`
+	// Image is the target image to roll out.
+	// If empty, triggers a rolling restart using the current default image.
+	Image string `json:"image,omitempty"`
 }
 
 // ── Admin methods on Client ───────────────────────────────
