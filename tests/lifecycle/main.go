@@ -174,13 +174,19 @@ func testRollingFull(ctx context.Context, client *sdk.Client) {
 		rs.Phase, rs.WarmUpdated, rs.WarmTotal, rs.ActiveUpdated, rs.ActiveTotal)
 
 	// ── 轮询直到 phase=idle（完成）或超时 ──
+	// 使用 1s 间隔（rotate job 也是 1s），确保能捕获中间进度
 	fmt.Println("    polling rolling status...")
 	deadline := time.Now().Add(15 * time.Minute)
 	var finalRS *sdk.RollingStatus
 	prevProgress := -1.0
 	seenProgressBelow1 := false
+	first := true
 	for time.Now().Before(deadline) {
-		time.Sleep(5 * time.Second)
+		if first {
+			first = false
+		} else {
+			time.Sleep(1 * time.Second)
+		}
 		st, err := client.RollingStatus(ctx)
 		if err != nil {
 			fmt.Printf("    poll error: %v\n", err)
