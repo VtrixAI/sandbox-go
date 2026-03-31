@@ -129,17 +129,19 @@ func (sb *Sandbox) Restart(ctx context.Context) error {
 	return sb.client.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/restart", nil)
 }
 
-// Extend extends the sandbox TTL by the given number of hours.
-// Pass 0 to use the server default (12h).
-func (sb *Sandbox) Extend(ctx context.Context, hours int) error {
+// Extend extends the sandbox TTL by the given duration in seconds (Atlas POST .../extend, field "seconds").
+// Seconds must be in (0, MaxExtendSeconds].
+func (sb *Sandbox) Extend(ctx context.Context, seconds int) error {
+	if err := validateExtendSeconds(seconds); err != nil {
+		return err
+	}
 	return sb.client.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/extend",
-		map[string]int{"hours": hours})
+		map[string]int{"seconds": seconds})
 }
 
-// ExtendTimeout extends the sandbox TTL by the given number of hours and refreshes Info.
-// Pass 0 to use the server default (12h).
-func (sb *Sandbox) ExtendTimeout(ctx context.Context, hours int) error {
-	if err := sb.Extend(ctx, hours); err != nil {
+// ExtendTimeout extends the sandbox TTL by seconds and refreshes Info.
+func (sb *Sandbox) ExtendTimeout(ctx context.Context, seconds int) error {
+	if err := sb.Extend(ctx, seconds); err != nil {
 		return err
 	}
 	return sb.Refresh(ctx)
@@ -182,7 +184,7 @@ func (sb *Sandbox) Timeout() int64 {
 	return ms
 }
 
-// Update patches the sandbox spec/image/payloads. At least one field in opts must be set.
+// Update patches the sandbox spec/image (Atlas PATCH /api/v1/sandbox/:id). At least one field in opts must be set.
 func (sb *Sandbox) Update(ctx context.Context, opts UpdateOptions) error {
 	body, _ := json.Marshal(opts)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPatch,
@@ -208,6 +210,16 @@ func (sb *Sandbox) Configure(ctx context.Context, payloads ...Payload) error {
 // Delete permanently deletes this sandbox.
 func (sb *Sandbox) Delete(ctx context.Context) error {
 	return sb.client.Delete(ctx, sb.Info.ID)
+}
+
+func validateExtendSeconds(seconds int) error {
+	if seconds <= 0 {
+		return fmt.Errorf("extend: seconds must be greater than 0")
+	}
+	if seconds > MaxExtendSeconds {
+		return fmt.Errorf("extend: seconds cannot exceed %d", MaxExtendSeconds)
+	}
+	return nil
 }
 
 // ── Shared HTTP helpers ───────────────────────────────────

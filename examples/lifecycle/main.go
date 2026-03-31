@@ -52,21 +52,20 @@ func main() {
 	}
 	fmt.Printf("Get: status=%s, ip=%s\n", info.Status, info.IP)
 
-	// ── 延期 12h ──────────────────────────────────────────
-	if err := sb.Extend(ctx, 12); err != nil {
+	// ── 延期 12h（Atlas 使用秒）──────────────────────────────
+	if err := sb.Extend(ctx, 12*3600); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("Extended TTL by 12h")
 
-	// ── 更新配置（不重启 WS，只改 spec/env）────────────
-	if err := sb.Update(ctx, sandbox.UpdateOptions{
-		Payloads: []sandbox.Payload{
-			{API: "/api/v1/env", Body: map[string]string{"LOG_LEVEL": "debug"}},
-		},
+	// ── 更新资源/镜像（PATCH）；改 env 等 payload 请用 Configure ──
+	if err := sb.Configure(ctx, sandbox.Payload{
+		API:  "/api/v1/env",
+		Body: map[string]string{"LOG_LEVEL": "debug"},
 	}); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("Updated env")
+	fmt.Println("Applied env via Configure")
 
 	// ── 立即应用配置 ──────────────────────────────────────
 	if err := sb.Configure(ctx); err != nil {

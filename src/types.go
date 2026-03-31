@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// MaxExtendSeconds is the maximum value accepted by Extend / ExtendTimeout (matches Atlas).
+const MaxExtendSeconds = 86400
+
 // ── Public types ──────────────────────────────────────────
 
 // Info holds the metadata returned by Atlas for a sandbox.
@@ -29,9 +32,11 @@ type Info struct {
 
 // Payload represents a single initialisation call sent to the sandbox pod.
 // API is the endpoint path (e.g. "/api/v1/env") and Body is the JSON body.
+// Envs are optional per-item environment overrides (Atlas PayloadItem.envs).
 type Payload struct {
-	API  string `json:"api"`
-	Body any    `json:"body,omitempty"`
+	API  string            `json:"api"`
+	Body any               `json:"body,omitempty"`
+	Envs map[string]string `json:"envs,omitempty"`
 }
 
 // CreateOptions configures sandbox creation.
@@ -46,11 +51,13 @@ type CreateOptions struct {
 	Env       map[string]string `json:"-"` // default env inherited by all commands
 }
 
-// Spec defines resource requirements for a sandbox.
+// Spec defines resource requirements for a sandbox (Atlas ResourceSpec).
 type Spec struct {
-	CPU    string `json:"cpu,omitempty"`
-	Memory string `json:"memory,omitempty"`
-	Image  string `json:"image,omitempty"`
+	CPU             string `json:"cpu,omitempty"`
+	Memory          string `json:"memory,omitempty"`
+	Image           string `json:"image,omitempty"`
+	RequestsCPU     string `json:"requests_cpu,omitempty"`
+	RequestsMemory  string `json:"requests_memory,omitempty"`
 }
 
 // RunOptions configures a command execution.
@@ -192,12 +199,11 @@ type ListResult struct {
 	Pagination Pagination `json:"pagination"`
 }
 
-// UpdateOptions specifies what to change when calling Sandbox.Update.
-// Payloads replaces all stored payloads and triggers a sandbox restart.
+// UpdateOptions specifies what to change when calling Sandbox.Update (Atlas PATCH /api/v1/sandbox/:id).
+// Payload changes are not supported on Update; use Configure to apply or replace stored payloads.
 type UpdateOptions struct {
-	Spec     *Spec     `json:"spec,omitempty"`
-	Image    string    `json:"image,omitempty"`
-	Payloads []Payload `json:"payloads,omitempty"`
+	Spec  *Spec  `json:"spec,omitempty"`
+	Image string `json:"image,omitempty"`
 }
 
 // ── Internal wire types ───────────────────────────────────
