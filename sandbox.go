@@ -442,7 +442,7 @@ type SandboxMetrics struct {
 
 // GetMetrics fetches current CPU and memory utilization for the sandbox.
 func (s *Sandbox) GetMetrics() (*SandboxMetrics, error) {
-	resp, err := s.doManagement(http.MethodGet, "/api/v1/sandboxes/"+s.SandboxID+"/metrics", nil)
+	resp, err := s.doManagement(http.MethodGet, "/api/v1/sandboxes/"+s.SandboxID+"/exec/metrics", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -452,8 +452,8 @@ func (s *Sandbox) GetMetrics() (*SandboxMetrics, error) {
 	}
 
 	var raw struct {
-		CPUUsedPct float64 `json:"cpuUsedPct"`
-		MemUsedMiB float64 `json:"memUsedMiB"`
+		CPUUsedPct float64 `json:"cpu_used_pct"`
+		MemUsedMiB float64 `json:"mem_used_mib"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("decode metrics: %w", err)
@@ -625,7 +625,7 @@ func SetSandboxTimeout(sandboxID string, seconds int, opts SandboxOpts) error {
 
 // GetSandboxMetrics returns the CPU and memory metrics for the sandbox identified by sandboxID.
 func GetSandboxMetrics(sandboxID string, opts SandboxOpts) (*SandboxMetrics, error) {
-	url := strings.TrimRight(opts.BaseURL, "/") + "/api/v1/sandboxes/" + sandboxID + "/metrics"
+	url := strings.TrimRight(opts.BaseURL, "/") + "/api/v1/sandboxes/" + sandboxID + "/exec/metrics"
 	resp, err := doStaticManagement(http.MethodGet, url, opts.APIKey, nil)
 	if err != nil {
 		return nil, err
@@ -635,8 +635,8 @@ func GetSandboxMetrics(sandboxID string, opts SandboxOpts) (*SandboxMetrics, err
 		return nil, parseAPIError(resp.StatusCode, body)
 	}
 	var raw struct {
-		CPUUsedPct float64 `json:"cpuUsedPct"`
-		MemUsedMiB float64 `json:"memUsedMiB"`
+		CPUUsedPct float64 `json:"cpu_used_pct"`
+		MemUsedMiB float64 `json:"mem_used_mib"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("decode metrics: %w", err)
