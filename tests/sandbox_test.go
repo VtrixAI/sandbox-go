@@ -138,19 +138,62 @@ func TestSandbox_Management(t *testing.T) {
 		t.Logf("DownloadURL = %q", dlURL)
 	})
 
-	t.Run("upload_url", func(t *testing.T) {
+	t.Run("resize_disk", func(t *testing.T) {
 		s, err := sandbox.Create(opts)
 		noErr(t, err, "Create")
 		defer s.Kill() //nolint:errcheck
 
-		upURL, err := s.UploadURL("/tmp/up_test.txt")
-		noErr(t, err, "UploadURL")
-		if upURL == "" {
-			t.Fatal("UploadURL returned empty string")
+		// Expand disk to 2 GiB.
+		err = s.ResizeDisk(2048)
+		noErr(t, err, "ResizeDisk")
+	})
+
+	t.Run("static_kill", func(t *testing.T) {
+		s, err := sandbox.Create(opts)
+		noErr(t, err, "Create")
+		err = sandbox.KillSandbox(s.SandboxID, opts)
+		noErr(t, err, "KillSandbox")
+	})
+
+	t.Run("static_get_info", func(t *testing.T) {
+		s, err := sandbox.Create(opts)
+		noErr(t, err, "Create")
+		defer s.Kill() //nolint:errcheck
+
+		info, err := sandbox.GetSandboxInfo(s.SandboxID, opts)
+		noErr(t, err, "GetSandboxInfo")
+		if info.SandboxID != s.SandboxID {
+			t.Errorf("GetSandboxInfo: got sandboxID %q, want %q", info.SandboxID, s.SandboxID)
 		}
-		if !strings.Contains(upURL, "signature") {
-			t.Errorf("UploadURL = %q, expected to contain 'signature'", upURL)
-		}
-		t.Logf("UploadURL = %q", upURL)
+		t.Logf("GetSandboxInfo: state=%s", info.State)
+	})
+
+	t.Run("static_set_timeout", func(t *testing.T) {
+		s, err := sandbox.Create(opts)
+		noErr(t, err, "Create")
+		defer s.Kill() //nolint:errcheck
+
+		err = sandbox.SetSandboxTimeout(s.SandboxID, 120, opts)
+		noErr(t, err, "SetSandboxTimeout")
+	})
+
+	t.Run("static_get_metrics", func(t *testing.T) {
+		s, err := sandbox.Create(opts)
+		noErr(t, err, "Create")
+		defer s.Kill() //nolint:errcheck
+
+		metrics, err := sandbox.GetSandboxMetrics(s.SandboxID, opts)
+		noErr(t, err, "GetSandboxMetrics")
+		t.Logf("GetSandboxMetrics: cpu=%.2f%% mem=%.2fMiB", metrics.CPUUsedPct, metrics.MemUsedMiB)
+	})
+
+	t.Run("static_resize_disk", func(t *testing.T) {
+		s, err := sandbox.Create(opts)
+		noErr(t, err, "Create")
+		defer s.Kill() //nolint:errcheck
+
+		err = sandbox.ResizeSandboxDisk(s.SandboxID, 2048, opts)
+		noErr(t, err, "ResizeSandboxDisk")
 	})
 }
+

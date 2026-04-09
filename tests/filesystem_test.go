@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -342,9 +343,57 @@ func TestFilesystem_Edit_NotUnique(t *testing.T) {
 	t.Logf("Edit not-unique error (expected): %v", err)
 }
 
-// ---------------------------------------------------------------------------
-// Filesystem — watch
-// ---------------------------------------------------------------------------
+func TestFilesystem_ReadStream(t *testing.T) {
+	const path = "/tmp/e2e_readstream.txt"
+	const content = "streaming content for readstream test"
+
+	_, err := sb.Files.WriteText(path, content)
+	noErr(t, err, "WriteText before ReadStream")
+
+	rc, err := sb.Files.ReadStream(path)
+	noErr(t, err, "ReadStream")
+	defer rc.Close()
+
+	got, err := io.ReadAll(rc)
+	noErr(t, err, "ReadAll from ReadStream")
+
+	if string(got) != content {
+		t.Fatalf("ReadStream: got %q, want %q", string(got), content)
+	}
+}
+
+func TestFilesystem_ReadStream_LargeFile(t *testing.T) {
+	const path = "/tmp/e2e_readstream_large.bin"
+
+	// Write 1 MiB of data.
+	data := make([]byte, 1<<20)
+	for i := range data {
+		data[i] = byte(i % 251)
+	}
+	_, err := sb.Files.Write(path, data)
+	noErr(t, err, "Write large file")
+
+	rc, err := sb.Files.ReadStream(path)
+	noErr(t, err, "ReadStream large file")
+	defer rc.Close()
+
+	got, err := io.ReadAll(rc)
+	noErr(t, err, "ReadAll large")
+
+	if len(got) != len(data) {
+		t.Fatalf("ReadStream large: got %d bytes, want %d", len(got), len(data))
+	}
+}
+
+func TestFilesystem_ReadStream_NotFound(t *testing.T) {
+	rc, err := sb.Files.ReadStream("/tmp/e2e_readstream_notexist_xyz_99999.txt")
+	if err == nil {
+		rc.Close()
+		t.Fatal("ReadStream of non-existent file should return error")
+	}
+	t.Logf("ReadStream non-existent error (expected): %v", err)
+}
+
 
 func TestFilesystem_WatchDir(t *testing.T) {
 	watchPath := "/tmp/e2e_watch"
