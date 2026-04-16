@@ -98,7 +98,7 @@ func (c *Client) createSandbox(ctx context.Context, opts CreateOptions) (Info, e
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.baseURL+"/api/v1/sandbox/create", bytes.NewReader(body))
+		c.baseURL+"/api/v1/sandboxes", bytes.NewReader(body))
 	if err != nil {
 		return Info{}, err
 	}
@@ -129,7 +129,7 @@ func (c *Client) createSandbox(ctx context.Context, opts CreateOptions) (Info, e
 
 func (c *Client) getSandbox(ctx context.Context, sandboxID string, opts CreateOptions) (Info, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		c.baseURL+"/api/v1/sandbox/"+sandboxID, nil)
+		c.baseURL+"/api/v1/sandboxes/"+sandboxID, nil)
 	if err != nil {
 		return Info{}, err
 	}
@@ -201,7 +201,7 @@ func (c *Client) connect(ctx context.Context, info Info, opts CreateOptions) (*S
 	default:
 		u.Scheme = "ws"
 	}
-	u.Path = fmt.Sprintf("/api/v1/sandbox/%s/connect", info.ID)
+	u.Path = fmt.Sprintf("/api/v1/sandboxes/%s/connect", info.ID)
 
 	headers := http.Header{}
 	token := opts.Token

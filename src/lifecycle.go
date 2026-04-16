@@ -16,7 +16,7 @@ import (
 func (c *Client) List(ctx context.Context, opts ListOptions) (*ListResult, error) {
 	body, _ := json.Marshal(opts)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.baseURL+"/api/v1/sandbox/list", bytes.NewReader(body))
+		c.baseURL+"/api/v1/sandboxes", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func (c *Client) Get(ctx context.Context, sandboxID string) (*Info, error) {
 // Delete permanently deletes a sandbox.
 func (c *Client) Delete(ctx context.Context, sandboxID string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete,
-		c.baseURL+"/api/v1/sandbox/"+sandboxID, nil)
+		c.baseURL+"/api/v1/sandboxes/"+sandboxID, nil)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func (sb *Sandbox) Refresh(ctx context.Context) error {
 // Stop pauses the sandbox without deleting it.
 // If opts.Blocking is true, polls until status is "stopped" or "failed".
 func (sb *Sandbox) Stop(ctx context.Context, opts *StopOptions) error {
-	if err := sb.client.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/stop", nil); err != nil {
+	if err := sb.client.doPost(ctx, "/api/v1/sandboxes/"+sb.Info.ID+"/stop", nil); err != nil {
 		return err
 	}
 	if opts == nil || !opts.Blocking {
@@ -121,12 +121,12 @@ func (sb *Sandbox) Stop(ctx context.Context, opts *StopOptions) error {
 
 // Start resumes a stopped sandbox.
 func (sb *Sandbox) Start(ctx context.Context) error {
-	return sb.client.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/start", nil)
+	return sb.client.doPost(ctx, "/api/v1/sandboxes/"+sb.Info.ID+"/start", nil)
 }
 
 // Restart restarts the sandbox.
 func (sb *Sandbox) Restart(ctx context.Context) error {
-	return sb.client.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/restart", nil)
+	return sb.client.doPost(ctx, "/api/v1/sandboxes/"+sb.Info.ID+"/restart", nil)
 }
 
 // Extend extends the sandbox TTL by the given duration in seconds (Atlas POST .../extend, field "seconds").
@@ -135,7 +135,7 @@ func (sb *Sandbox) Extend(ctx context.Context, seconds int) error {
 	if err := validateExtendSeconds(seconds); err != nil {
 		return err
 	}
-	return sb.client.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/extend",
+	return sb.client.doPost(ctx, "/api/v1/sandboxes/"+sb.Info.ID+"/extend",
 		map[string]int{"seconds": seconds})
 }
 
@@ -184,11 +184,11 @@ func (sb *Sandbox) Timeout() int64 {
 	return ms
 }
 
-// Update patches the sandbox spec/image (Atlas PATCH /api/v1/sandbox/:id). At least one field in opts must be set.
+// Update patches the sandbox spec/image. At least one field in opts must be set.
 func (sb *Sandbox) Update(ctx context.Context, opts UpdateOptions) error {
 	body, _ := json.Marshal(opts)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPatch,
-		sb.client.baseURL+"/api/v1/sandbox/"+sb.Info.ID, bytes.NewReader(body))
+		sb.client.baseURL+"/api/v1/sandboxes/"+sb.Info.ID, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -204,7 +204,7 @@ func (sb *Sandbox) Configure(ctx context.Context, payloads ...Payload) error {
 	if len(payloads) > 0 {
 		body = map[string]any{"payloads": payloads}
 	}
-	return sb.client.doPost(ctx, "/api/v1/sandbox/"+sb.Info.ID+"/configure", body)
+	return sb.client.doPost(ctx, "/api/v1/sandboxes/"+sb.Info.ID+"/configure", body)
 }
 
 // Delete permanently deletes this sandbox.
