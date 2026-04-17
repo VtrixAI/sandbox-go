@@ -4,12 +4,13 @@ import "time"
 
 // SandboxOpts holds options for creating or connecting to a sandbox.
 type SandboxOpts struct {
-	APIKey   string
-	BaseURL  string // e.g. "https://api.example.com"
-	Timeout  int    // sandbox lifetime seconds, default 300
-	Template string // sandbox template ID, default "base"
-	Metadata map[string]string
-	Envs     map[string]string
+	APIKey      string
+	BaseURL     string // e.g. "https://api.example.com"
+	Timeout     int    // sandbox lifetime seconds, default 300
+	Template    string // sandbox template ID, default "base"
+	WorkspaceID string // optional; workspace ID for cloud-storage access
+	Metadata    map[string]string
+	Envs        map[string]string
 }
 
 // ConnectionConfig holds the resolved connection parameters for a live sandbox.
@@ -76,6 +77,14 @@ type CommandResult struct {
 	Stderr   string
 	ExitCode int
 	Error    string
+}
+
+// GetResultResponse holds the structured output returned by GetResult.
+type GetResultResponse struct {
+	ExitCode       int
+	Stdout         string
+	Stderr         string
+	StartedAtUnix  int64
 }
 
 // FilesystemEvent describes a change in a watched directory.

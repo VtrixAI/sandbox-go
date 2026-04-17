@@ -272,7 +272,6 @@ func (f *Filesystem) WriteFiles(files []WriteEntry, opts ...WriteOpts) ([]WriteI
 		return nil, fmt.Errorf("create batch write request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Connect-Protocol-Version", "1")
 	f.setAccessToken(req)
 
 	resp, err := f.client.Do(req)

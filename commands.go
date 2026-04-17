@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -625,6 +626,34 @@ func (c *Commands) KillByTag(tag string, opts ...RequestOpts) (bool, error) {
 	return true, nil
 }
 
+// GetResult retrieves structured output (stdout/stderr/exitCode) for a completed process.
+// cmdId is the UUID returned in the 'start' SSE event. Call this after receiving the 'end' event.
+func (c *Commands) GetResult(cmdID string, opts ...RequestOpts) (*GetResultResponse, error) {
+	resp, err := c.doRPC("/process.Process/GetResult", map[string]string{"cmdId": cmdID})
+	if err != nil {
+		return nil, err
+	}
+	body, _ := readBody(resp)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, parseAPIError(resp.StatusCode, body)
+	}
+	var raw struct {
+		ExitCode      int    `json:"exitCode"`
+		Stdout        string `json:"stdout"`
+		Stderr        string `json:"stderr"`
+		StartedAtUnix int64  `json:"startedAtUnix"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("decode GetResult response: %w", err)
+	}
+	return &GetResultResponse{
+		ExitCode:      raw.ExitCode,
+		Stdout:        raw.Stdout,
+		Stderr:        raw.Stderr,
+		StartedAtUnix: raw.StartedAtUnix,
+	}, nil
+}
+
 // ConnectByTag attaches to an already-running process identified by tag.
 func (c *Commands) ConnectByTag(tag string, opts ...RunOpts) (*CommandHandle, error) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -858,4 +887,102 @@ func (p *Pty) SendInput(pid int, data []byte, opts ...RequestOpts) error {
 		return err
 	}
 	return checkResponse(resp)
+}
+
+// ---- v2 Agent-Friendly API ----
+
+// V2RunResult holds the response from RunV2.
+type V2RunResult struct {
+	Stdout     string `json:"stdout"`
+	Stderr     string `json:"stderr"`
+	ExitCode   int    `json:"exit_code"`
+	DurationMs int64  `json:"duration_ms"`
+	Error      string `json:"error,omitempty"`
+}
+
+// RunV2 executes a shell command synchronously via the v2 agent-friendly API (POST /v2/run).
+// No Connect header required. Returns when the command exits.
+func (c *Commands) RunV2(cmd string, opts ...RunOpts) (*V2RunResult, error) {
+	body := map[string]interface{}{"cmd": cmd}
+	var o RunOpts
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	if o.Cwd != "" {
+		body["cwd"] = o.Cwd
+	}
+	if len(o.Envs) > 0 {
+		body["env"] = o.Envs
+	}
+	if o.Timeout != nil {
+		body["timeout"] = *o.Timeout
+	}
+
+	b, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal v2/run body: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, c.envdURL("/v2/run"), bytes.NewReader(b))
+	if err != nil {
+		return nil, fmt.Errorf("create v2/run request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.setAccessToken(req)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("POST /v2/run: %w", err)
+	}
+	raw, _ := readBody(resp)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, parseAPIError(resp.StatusCode, raw)
+	}
+	var result V2RunResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("decode v2/run response: %w", err)
+	}
+	return &result, nil
+}
+
+// ReadFileV2 reads a file's raw bytes via the v2 agent-friendly API (GET /v2/file).
+func (f *Filesystem) ReadFileV2(path string) ([]byte, error) {
+	u := f.envdURL("/v2/file") + "?path=" + url.QueryEscape(path)
+	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create v2/file request: %w", err)
+	}
+	f.setAccessToken(req)
+
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GET /v2/file: %w", err)
+	}
+	body, _ := readBody(resp)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, parseAPIError(resp.StatusCode, body)
+	}
+	return body, nil
+}
+
+// WriteFileV2 writes data to a file via the v2 agent-friendly API (POST /v2/file).
+// Parent directories are created automatically by the server.
+func (f *Filesystem) WriteFileV2(path string, data []byte) error {
+	u := f.envdURL("/v2/file") + "?path=" + url.QueryEscape(path)
+	req, err := http.NewRequest(http.MethodPost, u, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("create v2/file write request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	f.setAccessToken(req)
+
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST /v2/file: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return parseAPIError(resp.StatusCode, body)
+	}
+	return nil
 }

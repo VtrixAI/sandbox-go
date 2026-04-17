@@ -84,10 +84,11 @@ func newClient(timeout time.Duration) *http.Client {
 // ---- wire types for Management API ----
 
 type createRequest struct {
-	TemplateID string            `json:"templateID"`
-	Timeout    int               `json:"timeout"`
-	Metadata   map[string]string `json:"metadata,omitempty"`
-	EnvVars    map[string]string `json:"envVars,omitempty"`
+	TemplateID  string            `json:"templateID"`
+	WorkspaceID string            `json:"workspaceId,omitempty"`
+	Timeout     int               `json:"timeout"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	EnvVars     map[string]string `json:"envVars,omitempty"`
 }
 
 // sandboxResponse maps Atlas E2BSandboxDetail / E2BSandbox responses.
@@ -194,10 +195,11 @@ func Create(opts SandboxOpts) (*Sandbox, error) {
 	}
 
 	reqBody := createRequest{
-		TemplateID: opts.Template,
-		Timeout:    opts.Timeout,
-		Metadata:   opts.Metadata,
-		EnvVars:    opts.Envs,
+		TemplateID:  opts.Template,
+		WorkspaceID: opts.WorkspaceID,
+		Timeout:     opts.Timeout,
+		Metadata:    opts.Metadata,
+		EnvVars:     opts.Envs,
 	}
 
 	b, err := json.Marshal(reqBody)
