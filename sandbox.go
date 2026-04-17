@@ -442,7 +442,7 @@ type SandboxMetrics struct {
 
 // GetMetrics fetches current CPU and memory utilization for the sandbox.
 func (s *Sandbox) GetMetrics() (*SandboxMetrics, error) {
-	resp, err := s.doManagement(http.MethodGet, "/api/v1/sandboxes/"+s.SandboxID+"/exec/metrics", nil)
+	resp, err := s.doManagement(http.MethodGet, "/api/v1/sandboxes/"+s.SandboxID+"/metrics", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -452,13 +452,36 @@ func (s *Sandbox) GetMetrics() (*SandboxMetrics, error) {
 	}
 
 	var raw struct {
-		CPUUsedPct float64 `json:"cpu_used_pct"`
-		MemUsedMiB float64 `json:"mem_used_mib"`
+		CPUUsedPct float64 `json:"cpuUsedPct"`
+		MemUsedMiB float64 `json:"memUsedMiB"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("decode metrics: %w", err)
 	}
 	return &SandboxMetrics{CPUUsedPct: raw.CPUUsedPct, MemUsedMiB: raw.MemUsedMiB}, nil
+}
+
+// BetaPause pauses (snapshots) the sandbox. Resume later with Connect.
+func (s *Sandbox) BetaPause() error {
+	resp, err := s.doManagement(http.MethodPost, "/api/v1/sandboxes/"+s.SandboxID+"/pause", nil)
+	if err != nil {
+		return err
+	}
+	return checkResponse(resp)
+}
+
+// Refresh extends the sandbox lifetime by duration seconds (max 3600).
+// Pass 0 to use the server default.
+func (s *Sandbox) Refresh(duration int) error {
+	var body map[string]int
+	if duration > 0 {
+		body = map[string]int{"duration": duration}
+	}
+	resp, err := s.doManagement(http.MethodPost, "/api/v1/sandboxes/"+s.SandboxID+"/refreshes", body)
+	if err != nil {
+		return err
+	}
+	return checkResponse(resp)
 }
 
 // ResizeDisk expands the sandbox disk to sizeMB megabytes.
@@ -562,6 +585,32 @@ func waitUntilReady(sb *Sandbox, opts SandboxOpts, timeout time.Duration) error 
 
 // ---- Static management helpers (no Sandbox instance required) ----
 
+// ListMetrics returns CPU/memory metrics for all running sandboxes.
+func ListMetrics(opts SandboxOpts) ([]SandboxMetrics, error) {
+	u := strings.TrimRight(opts.BaseURL, "/") + "/api/v1/sandboxes/metrics"
+	resp, err := doStaticManagement(http.MethodGet, u, opts.APIKey, nil)
+	if err != nil {
+		return nil, err
+	}
+	body, _ := readBody(resp)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, parseAPIError(resp.StatusCode, body)
+	}
+	var raw []struct {
+		CPUUsedPct float64 `json:"cpuUsedPct"`
+		MemUsedMiB float64 `json:"memUsedMiB"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("decode list metrics: %w", err)
+	}
+	out := make([]SandboxMetrics, len(raw))
+	for i, r := range raw {
+		out[i] = SandboxMetrics{CPUUsedPct: r.CPUUsedPct, MemUsedMiB: r.MemUsedMiB}
+	}
+	return out, nil
+}
+
+
 // doStaticManagement performs an authenticated management request without a Sandbox instance.
 func doStaticManagement(method, url string, apiKey string, body interface{}) (*http.Response, error) {
 	var reqBody io.Reader
@@ -625,7 +674,7 @@ func SetSandboxTimeout(sandboxID string, seconds int, opts SandboxOpts) error {
 
 // GetSandboxMetrics returns the CPU and memory metrics for the sandbox identified by sandboxID.
 func GetSandboxMetrics(sandboxID string, opts SandboxOpts) (*SandboxMetrics, error) {
-	url := strings.TrimRight(opts.BaseURL, "/") + "/api/v1/sandboxes/" + sandboxID + "/exec/metrics"
+	url := strings.TrimRight(opts.BaseURL, "/") + "/api/v1/sandboxes/" + sandboxID + "/metrics"
 	resp, err := doStaticManagement(http.MethodGet, url, opts.APIKey, nil)
 	if err != nil {
 		return nil, err
@@ -635,8 +684,8 @@ func GetSandboxMetrics(sandboxID string, opts SandboxOpts) (*SandboxMetrics, err
 		return nil, parseAPIError(resp.StatusCode, body)
 	}
 	var raw struct {
-		CPUUsedPct float64 `json:"cpu_used_pct"`
-		MemUsedMiB float64 `json:"mem_used_mib"`
+		CPUUsedPct float64 `json:"cpuUsedPct"`
+		MemUsedMiB float64 `json:"memUsedMiB"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("decode metrics: %w", err)

@@ -35,7 +35,6 @@ type processConfig struct {
 	Args []string          `json:"args,omitempty"`
 	Envs map[string]string `json:"envs,omitempty"`
 	Cwd  string            `json:"cwd,omitempty"`
-	User string            `json:"user,omitempty"`
 }
 
 // startRequest is the wire format for process.Process/Start.
@@ -196,7 +195,6 @@ func buildStartRequest(cmd string, opts RunOpts) startRequest {
 			Args: []string{"-c", cmd},
 			Envs: opts.Envs,
 			Cwd:  opts.Cwd,
-			User: opts.User,
 		},
 		Timeout: opts.Timeout,
 		Tag:     opts.Tag,
@@ -721,7 +719,6 @@ func (p *Pty) Create(size PtySize, opts ...PtyCreateOpts) (*CommandHandle, error
 			Cmd:  o.Cmd,
 			Envs: o.Envs,
 			Cwd:  o.Cwd,
-			User: o.User,
 		},
 		Pty: &ptyConfig{Size: ptySize{Rows: size.Rows, Cols: size.Cols}},
 	}
